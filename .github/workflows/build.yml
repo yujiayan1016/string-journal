@@ -1,0 +1,22 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build universal app
+        run: |
+          chmod +x build.sh
+          UNIVERSAL=1 ./build.sh
+      - name: Zip
+        run: cd build && ditto -c -k --keepParent "绳上手帐.app" StringJournal.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StringJournal
+          path: build/StringJournal.zip
