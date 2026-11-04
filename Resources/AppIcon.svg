@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <clipPath id="sq"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
+    <pattern id="dots" width="46" height="46" patternUnits="userSpaceOnUse" x="104" y="104">
+      <circle cx="23" cy="23" r="3.4" fill="#7E8CA6" opacity=".42"/>
+    </pattern>
+    <linearGradient id="page" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F8F7F2"/>
+      <stop offset="1" stop-color="#ECEAE2"/>
+    </linearGradient>
+    <linearGradient id="note" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FCF3CF"/>
+      <stop offset="1" stop-color="#F6E7B2"/>
+    </linearGradient>
+    <linearGradient id="wood" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#EBD2A6"/>
+      <stop offset="1" stop-color="#C9A06A"/>
+    </linearGradient>
+    <filter id="outer" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#1F2433" flood-opacity=".28"/>
+    </filter>
+    <filter id="lift" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="6" dy="22" stdDeviation="18" flood-color="#2E3448" flood-opacity=".26"/>
+    </filter>
+    <filter id="small" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="6" stdDeviation="5" flood-color="#2E3448" flood-opacity=".3"/>
+    </filter>
+  </defs>
+
+  <!-- tile -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#page)" filter="url(#outer)"/>
+
+  <g clip-path="url(#sq)">
+    <rect x="100" y="100" width="824" height="824" fill="url(#dots)"/>
+
+    <!-- second note peeking in from the right, held by washi tape -->
+    <g transform="rotate(7 860 520)" filter="url(#lift)">
+      <rect x="760" y="392" width="260" height="250" rx="6" fill="#F7DCD6"/>
+    </g>
+    <g transform="rotate(-8 812 372)">
+      <rect x="772" y="340" width="84" height="64" fill="#A9CFBF" opacity=".92"/>
+      <g stroke="#FFFFFF" stroke-width="9" opacity=".7">
+        <line x1="760" y1="330" x2="800" y2="414"/><line x1="784" y1="330" x2="824" y2="414"/>
+        <line x1="808" y1="330" x2="848" y2="414"/><line x1="832" y1="330" x2="872" y2="414"/>
+      </g>
+    </g>
+
+    <!-- baker's twine -->
+    <path d="M40 300 Q 512 470 984 300" fill="none" stroke="#2E3448" stroke-opacity=".16" stroke-width="18" transform="translate(0 12)" stroke-linecap="round"/>
+    <path d="M40 300 Q 512 470 984 300" fill="none" stroke="#F6F1E8" stroke-width="18" stroke-linecap="round"/>
+    <path d="M40 300 Q 512 470 984 300" fill="none" stroke="#C7372F" stroke-width="18" stroke-dasharray="15 18"/>
+
+    <!-- the main note -->
+    <g transform="translate(512 398) scale(1.1) translate(-512 -398) rotate(-5 512 400)">
+      <g filter="url(#lift)">
+        <path d="M318 398 L706 398 L708 792 Q 520 806 316 790 Z" fill="url(#note)"/>
+      </g>
+      <!-- ruled lines -->
+      <g stroke="#5F8CB9" stroke-opacity=".32" stroke-width="4">
+        <line x1="318" y1="548" x2="707" y2="548"/>
+        <line x1="318" y1="616" x2="707" y2="616"/>
+        <line x1="318" y1="684" x2="707" y2="684"/>
+      </g>
+      <line x1="352" y1="398" x2="352" y2="792" stroke="#C7372F" stroke-opacity=".38" stroke-width="4"/>
+      <!-- highlighter + title stroke -->
+      <path d="M380 478 L606 470 L602 512 L384 518 Z" fill="#A9CFBF" opacity=".85"/>
+      <path d="M392 488 q 26 -18 52 0 t 52 0 t 52 0 t 44 -2" fill="none" stroke="#2E3448" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
+      <!-- handwriting -->
+      <path d="M392 586 q 22 -14 44 0 t 44 0 t 44 0 t 44 0 t 44 0 t 34 -2" fill="none" stroke="#2E3448" stroke-opacity=".78" stroke-width="11" stroke-linecap="round"/>
+      <path d="M392 654 q 22 -14 44 0 t 44 0 t 44 0 t 30 -2" fill="none" stroke="#2E3448" stroke-opacity=".78" stroke-width="11" stroke-linecap="round"/>
+      <!-- done box with a red tick -->
+      <path d="M608 696 L652 694 L654 738 L610 740 Z" fill="none" stroke="#2E3448" stroke-opacity=".7" stroke-width="7" stroke-linejoin="round"/>
+      <path d="M612 712 L630 734 L676 676" fill="none" stroke="#C7372F" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+
+    <!-- mini wooden peg on the twine -->
+    <g transform="rotate(-5 512 400)" filter="url(#small)">
+      <rect x="488" y="326" width="48" height="122" rx="20" fill="url(#wood)"/>
+      <line x1="512" y1="334" x2="512" y2="440" stroke="#6E4E2C" stroke-opacity=".45" stroke-width="4"/>
+      <rect x="478" y="388" width="68" height="20" rx="8" fill="#7A7D84"/>
+      <path d="M512 434 c -16 -12 -12 -26 0 -18 c 12 -8 16 6 0 18 z" fill="#FFFFFF" opacity=".9"/>
+    </g>
+  </g>
+</svg>

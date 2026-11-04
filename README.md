@@ -69,6 +69,8 @@ Sources/
   Model.swift     便签样式、数据存储
   Tuning.swift    手感参数
 Resources/Fonts/  霞鹜文楷 TC、站酷快乐体（已裁剪为常用字）
+Resources/AppIcon.svg       应用图标源文件
+Resources/AppIcon.iconset/  构建时由 iconutil 生成 AppIcon.icns
 ```
 
 ## 致谢
