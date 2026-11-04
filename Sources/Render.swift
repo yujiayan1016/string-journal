@@ -82,17 +82,17 @@ final class Renderer {
     // MARK: scene
 
     func drawAll() {
-        drawEnvelope()
         for c in world.cards.filter({ $0.mode == .free }).sorted(by: { $0.z < $1.z }) { drawPaper(c, lift: 0); drawAttach(c) }
         let hanging = world.cards.filter { $0.mode == .hang }
         drawGhost()
         for c in hanging { drawPaper(c, lift: 1) }
         drawRope()
         for c in hanging { drawAttach(c) }
+        drawBottle()
         drawPlus()
         for c in world.cards where c.mode == .crumple { drawBall(c) }
         if let d = world.dragging { drawPaper(d, lift: 2); drawAttach(d) }
-        if world.basket.hot { drawHotLabel() }
+        if world.bottle.hot { drawHotLabel() }
         drawToast()
     }
 
@@ -497,102 +497,116 @@ final class Renderer {
         ctx.restoreGState()
     }
 
-    // MARK: kraft envelope for finished notes
+    // MARK: drift bottle for finished notes
 
-    private func squash() {
-        let b = world.basket
-        ctx.translateBy(x: b.x, y: b.bottom); ctx.scaleBy(x: 2 - b.s, y: b.s); ctx.translateBy(x: -b.x, y: -b.bottom)
+    /// Glass outline in bottle space: origin at the knot on the rope, y down.
+    private func bottlePath() -> CGPath {
+        let p = CGMutablePath()
+        p.move(to: CGPoint(x: -7, y: 26))
+        p.addLine(to: CGPoint(x: -7, y: 38))
+        p.addQuadCurve(to: CGPoint(x: -22, y: 54), control: CGPoint(x: -22, y: 40))
+        p.addLine(to: CGPoint(x: -22, y: 88))
+        p.addQuadCurve(to: CGPoint(x: -14, y: 96), control: CGPoint(x: -22, y: 96))
+        p.addLine(to: CGPoint(x: 14, y: 96))
+        p.addQuadCurve(to: CGPoint(x: 22, y: 88), control: CGPoint(x: 22, y: 96))
+        p.addLine(to: CGPoint(x: 22, y: 54))
+        p.addQuadCurve(to: CGPoint(x: 7, y: 38), control: CGPoint(x: 22, y: 40))
+        p.addLine(to: CGPoint(x: 7, y: 26))
+        p.closeSubpath()
+        return p
     }
 
-    private func drawEnvelope() {
-        let b = world.basket, x = b.x, top = b.rim, bottom = b.bottom, hw: CGFloat = 66
-        // back panel, open flap, peeking notes
-        ctx.saveGState(); squash()
-        shadow(0, 4, 10, rgba(40, 46, 62, 0.2))
-        ctx.setFillColor(rgb(0xB48A5C)); ctx.fill(CGRect(x: x - hw, y: top - 4, width: hw * 2, height: bottom - top + 4))
-        noShadow()
-        let flap = CGMutablePath()
-        flap.move(to: CGPoint(x: x - hw, y: top - 4)); flap.addLine(to: CGPoint(x: x - 10, y: top - 44))
-        flap.addQuadCurve(to: CGPoint(x: x + 10, y: top - 44), control: CGPoint(x: x, y: top - 50))
-        flap.addLine(to: CGPoint(x: x + hw, y: top - 4)); flap.closeSubpath()
-        ctx.addPath(flap); ctx.setFillColor(rgb(0xC29A6B)); ctx.fillPath()
-        ctx.addPath(flap); ctx.setStrokeColor(rgba(90, 60, 30, 0.25)); ctx.setLineWidth(1); ctx.strokePath()
-        ctx.setFillColor(rgba(70, 45, 20, 0.22)); ctx.fill(CGRect(x: x - hw + 4, y: top - 4, width: hw * 2 - 8, height: 8))
-        let peeks = Array(world.finished.prefix(4))
-        for (i, c) in peeks.enumerated().reversed() {
-            ctx.saveGState()
-            ctx.translateBy(x: x - 34 + CGFloat(i) * 22, y: top + 6); ctx.rotate(by: (srand(c.seed, 3) - 0.5) * 0.5)
-            shadow(0, 0, 3, rgba(40, 46, 62, 0.15))
-            ctx.setFillColor(rgb(c.styleDef.color)); ctx.fill(CGRect(x: -15, y: -18, width: 30, height: 30))
-            ctx.restoreGState()
-        }
-        ctx.restoreGState()
+    private func drawBottle() {
+        let b = world.bottle, hang = world.bottleHang
 
-        // notes sliding in: visible above the mouth only
-        let sinking = world.cards.filter { $0.mode == .sink }.sorted { $0.z < $1.z }
-        if !sinking.isEmpty {
-            ctx.saveGState()
-            ctx.clip(to: CGRect(x: -1000, y: -1000, width: world.W + 2000, height: top + 1004))
-            for c in sinking { drawPaper(c, lift: 2); drawAttach(c) }
-            ctx.restoreGState()
+        // notes flying in shrink toward the mouth and fade just before they slip inside
+        for c in world.cards.filter({ $0.mode == .sink }).sorted(by: { $0.z < $1.z }) {
+            let t = min(1, c.t)
+            let a: CGFloat = t < 0.7 ? 1 : max(0, (1 - t) / 0.3)
+            drawPaper(c, lift: 2, alpha: a); drawAttach(c, alpha: a)
         }
 
-        // front pocket
-        ctx.saveGState(); squash()
-        let front = CGMutablePath()
-        front.move(to: CGPoint(x: x - hw, y: top + 2)); front.addLine(to: CGPoint(x: x - 16, y: top + 2))
-        front.addQuadCurve(to: CGPoint(x: x + 16, y: top + 2), control: CGPoint(x: x, y: top + 16))
-        front.addLine(to: CGPoint(x: x + hw, y: top + 2)); front.addLine(to: CGPoint(x: x + hw, y: bottom))
-        front.addLine(to: CGPoint(x: x - hw, y: bottom)); front.closeSubpath()
         ctx.saveGState()
-        ctx.addPath(front); ctx.clip()
-        linear([rgb(0xD8B487), rgb(0xC9A275)], [0, 1], CGPoint(x: 0, y: top), CGPoint(x: 0, y: bottom))
-        ctx.setLineWidth(0.7)
-        for i in 0..<60 {
-            let d = Double(i)
-            let fx = x - hw + srand(7, d) * hw * 2, fy = top + srand(8, d) * (bottom - top)
-            let a = srand(9, d) * .pi, l = 3 + srand(10, d) * 8
-            ctx.setStrokeColor(i % 3 != 0 ? rgba(110, 75, 35, 0.15) : rgba(255, 240, 215, 0.3))
-            line(CGPoint(x: fx, y: fy), CGPoint(x: fx + cos(a) * l, y: fy + sin(a) * l))
-        }
-        ctx.setStrokeColor(rgba(100, 65, 30, 0.22)); ctx.setLineWidth(1)
-        line(CGPoint(x: x - hw, y: bottom), CGPoint(x: x - 6, y: top + 44))
-        line(CGPoint(x: x + hw, y: bottom), CGPoint(x: x + 6, y: top + 44))
-        ctx.restoreGState()
-        // stitching
-        ctx.setLineDash(phase: 0, lengths: [3, 3]); ctx.setStrokeColor(rgba(255, 248, 235, 0.75)); ctx.setLineWidth(1)
-        ctx.stroke(CGRect(x: x - hw + 5, y: top + 8, width: hw * 2 - 10, height: bottom - top - 13))
+        ctx.translateBy(x: hang.x, y: hang.y); ctx.rotate(by: b.ang)
+        ctx.translateBy(x: 0, y: 66); ctx.scaleBy(x: b.s, y: b.s); ctx.translateBy(x: 0, y: -66)
+
+        // a short length of twine from the knot
+        ctx.setLineCap(.round)
+        ctx.setStrokeColor(rgb(0xF4EFE7)); ctx.setLineWidth(2)
+        line(CGPoint(x: 0, y: 0), CGPoint(x: 0, y: 20))
+        ctx.setLineDash(phase: 0, lengths: [2, 2.6]); ctx.setStrokeColor(rgb(SEAL)); ctx.setLineWidth(2)
+        line(CGPoint(x: 0, y: 0), CGPoint(x: 0, y: 20))
         ctx.setLineDash(phase: 0, lengths: [])
-        // label
-        ctx.saveGState()
-        ctx.translateBy(x: x - 18, y: top + 38); ctx.rotate(by: -0.05)
-        shadow(0, 1, 2, rgba(40, 46, 62, 0.15))
-        ctx.setFillColor(rgb(0xFBFAF5)); ctx.fill(CGRect(x: -30, y: -12, width: 60, height: 24))
+
+        let glass = bottlePath()
+        shadow(0, 6, 10, rgba(40, 46, 62, 0.18))
+        ctx.addPath(glass); ctx.setFillColor(rgba(214, 232, 236, 0.42)); ctx.fillPath()
         noShadow()
-        let n = world.finished.count
-        drawCentered(text(n > 0 ? "已完成 \(n)" : "已完成", font: Fonts.title(14), color: rgb(INK)), at: CGPoint(x: 0, y: 1))
+
+        // finished notes, rolled into little scrolls
+        ctx.saveGState()
+        ctx.addPath(glass); ctx.clip()
+        let items = Array(world.finished.prefix(12))
+        for (i, c) in items.enumerated() {
+            let row = i / 3, col = i % 3
+            let x = -12 + CGFloat(col) * 12 + (row % 2 == 1 ? 5 : 0)
+            let y = 89 - CGFloat(row) * 8
+            ctx.saveGState()
+            ctx.translateBy(x: x, y: y); ctx.rotate(by: (srand(c.seed, 5) - 0.5) * 0.9)
+            let roll = CGPath(roundedRect: CGRect(x: -9, y: -3.5, width: 18, height: 7), cornerWidth: 3.5, cornerHeight: 3.5, transform: nil)
+            ctx.addPath(roll); ctx.setFillColor(rgb(c.styleDef.color)); ctx.fillPath()
+            ctx.addPath(roll); ctx.setStrokeColor(rgba(60, 50, 40, 0.25)); ctx.setLineWidth(0.6); ctx.strokePath()
+            ctx.setStrokeColor(rgb(SEAL, 0.8)); ctx.setLineWidth(1)
+            line(CGPoint(x: 0, y: -3.5), CGPoint(x: 0, y: 3.5))
+            ctx.restoreGState()
+        }
+        // glass shading
+        linear([rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0), rgba(255, 255, 255, 0), rgba(60, 90, 110, 0.14)], [0, 0.3, 0.72, 1],
+               CGPoint(x: -22, y: 0), CGPoint(x: 22, y: 0))
         ctx.restoreGState()
-        // button & string
-        let bx = x + 40, by = top + 38
-        ctx.setStrokeColor(rgb(0xF3EEE6)); ctx.setLineWidth(1.4)
-        ctx.beginPath(); ctx.move(to: CGPoint(x: bx, y: by))
-        ctx.addCurve(to: CGPoint(x: bx + 18, y: by + 26), control1: CGPoint(x: bx + 14, y: by + 10), control2: CGPoint(x: bx + 4, y: by + 20))
-        ctx.strokePath()
-        ctx.setFillColor(rgb(0xE9D9BE)); dot(CGPoint(x: bx, y: by), 6.5)
-        ctx.setStrokeColor(rgba(90, 60, 30, 0.35)); ctx.setLineWidth(0.8)
-        ctx.strokeEllipse(in: CGRect(x: bx - 6.5, y: by - 6.5, width: 13, height: 13))
-        ctx.setFillColor(rgba(90, 60, 30, 0.45))
-        for (dx, dy) in [(-1.8, -1.8), (1.8, -1.8), (-1.8, 1.8), (1.8, 1.8)] as [(CGFloat, CGFloat)] { dot(CGPoint(x: bx + dx, y: by + dy), 0.9) }
+
+        ctx.addPath(glass); ctx.setStrokeColor(rgba(90, 125, 145, 0.55)); ctx.setLineWidth(1.2); ctx.strokePath()
+        ctx.setStrokeColor(rgba(255, 255, 255, 0.75)); ctx.setLineWidth(2.2)
+        line(CGPoint(x: -15, y: 57), CGPoint(x: -15, y: 84))
+        ctx.setLineWidth(1.2); line(CGPoint(x: -4, y: 29), CGPoint(x: -4, y: 35))
+
+        // cork
+        let cork = CGPath(roundedRect: CGRect(x: -6.5, y: 18, width: 13, height: 11), cornerWidth: 2, cornerHeight: 2, transform: nil)
+        ctx.addPath(cork); ctx.setFillColor(rgb(0xC9A477)); ctx.fillPath()
+        ctx.setFillColor(rgba(110, 75, 35, 0.35))
+        for (dx, dy) in [(-3, 21), (2, 23), (-1, 26), (3.5, 19.5)] as [(CGFloat, CGFloat)] { dot(CGPoint(x: dx, y: dy), 0.7) }
+        // twine wrapped round the neck
+        ctx.setLineWidth(1.4)
+        ctx.setStrokeColor(rgb(SEAL)); line(CGPoint(x: -8, y: 31), CGPoint(x: 8, y: 32.5))
+        ctx.setStrokeColor(rgb(0xF4EFE7)); line(CGPoint(x: -8, y: 33.5), CGPoint(x: 8, y: 35))
+
+        // little kraft tag with the count
+        let n = world.finished.count
+        if n > 0 {
+            ctx.saveGState()
+            ctx.translateBy(x: 9, y: 34); ctx.rotate(by: 0.35)
+            ctx.setStrokeColor(rgb(0xF4EFE7)); ctx.setLineWidth(0.9)
+            line(CGPoint(x: 0, y: 0), CGPoint(x: 8, y: 0))
+            let tag = CGMutablePath()
+            tag.move(to: CGPoint(x: 8, y: -6)); tag.addLine(to: CGPoint(x: 28, y: -6)); tag.addLine(to: CGPoint(x: 28, y: 6))
+            tag.addLine(to: CGPoint(x: 8, y: 6)); tag.addLine(to: CGPoint(x: 4, y: 0)); tag.closeSubpath()
+            shadow(0, 1, 2, rgba(40, 46, 62, 0.18))
+            ctx.addPath(tag); ctx.setFillColor(rgb(0xD5AE7E)); ctx.fillPath()
+            noShadow()
+            ctx.setFillColor(rgb(0xF4EFE7)); dot(CGPoint(x: 8, y: 0), 1.3)
+            drawCentered(text("\(n)", font: Fonts.title(10), color: rgb(INK)), at: CGPoint(x: 18, y: 0.5))
+            ctx.restoreGState()
+        }
         ctx.restoreGState()
     }
 
     private func drawHotLabel() {
-        let b = world.basket
-        let s = text("松手放进信封", font: Fonts.title(14), color: rgb(0xFBFAF5))
-        let sz = s.size(), w = sz.width + 20, y = b.rim - 66
-        ctx.addPath(CGPath(roundedRect: CGRect(x: b.x - w / 2, y: y - 12, width: w, height: 24), cornerWidth: 8, cornerHeight: 8, transform: nil))
+        let c = world.bottleCenter
+        let s = text("松手放进漂流瓶", font: Fonts.title(14), color: rgb(0xFBFAF5))
+        let sz = s.size(), w = sz.width + 20, x = c.x + 34
+        ctx.addPath(CGPath(roundedRect: CGRect(x: x, y: c.y - 12, width: w, height: 24), cornerWidth: 8, cornerHeight: 8, transform: nil))
         ctx.setFillColor(rgb(INK)); ctx.fillPath()
-        drawCentered(s, at: CGPoint(x: b.x, y: y))
+        drawCentered(s, at: CGPoint(x: x + w / 2, y: c.y))
     }
 
     // MARK: undo strip
@@ -606,7 +620,7 @@ final class Renderer {
         let ls = label.size(), bs = btn.size()
         let h: CGFloat = 36, bw = bs.width + 24
         let w = 16 + ls.width + 12 + bw + 7
-        let x = world.basket.x + 82, y = world.basket.bottom - 44
+        let x: CGFloat = 16, y = world.anchorY + 172
         let rect = CGRect(x: x, y: y, width: w, height: h)
         world.toastRect = rect
         world.toastButton = CGRect(x: rect.maxX - 7 - bw, y: y + 6, width: bw, height: h - 12)

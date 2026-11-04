@@ -149,9 +149,11 @@ private struct FinishedView: View {
                     Spacer()
                     Text(model.items.isEmpty ? "" : "\(model.items.count) 张").font(.custom(handFont, size: 13)).foregroundColor(inkColor.opacity(0.6))
                 }
-                .padding(.bottom, 8)
+                .padding(.bottom, 2)
+                Text("第二天或重启后，漂流瓶会自动清空").font(.custom(handFont, size: 11)).foregroundColor(inkColor.opacity(0.45))
+                    .padding(.bottom, 8)
                 if model.items.isEmpty {
-                    Text("信封还是空的。勾选便签右下角的小方框、把便签拖进信封，或者用力甩出屏幕，完成的便签都会收在这里。")
+                    Text("漂流瓶还是空的。勾选便签右下角的小方框、把便签拖进漂流瓶，或者用力甩出屏幕，完成的便签都会收在这里。")
                         .font(.custom(handFont, size: 14)).foregroundColor(inkColor.opacity(0.6))
                         .lineSpacing(6).fixedSize(horizontal: false, vertical: true)
                         .padding(.vertical, 6)
@@ -221,15 +223,14 @@ final class FinishedController: NSObject, NSWindowDelegate {
         model.items = world?.finished ?? []
         guard panel.isVisible, let h = host else { return }
         let size = h.fittingSize
-        var f = panel.frame
-        f.size = size            // grow upward from the anchored bottom edge
-        panel.setFrame(f, display: true)
+        let top = panel.frame.maxY   // keep the top edge where it hangs, grow downward
+        panel.setFrame(NSRect(x: panel.frame.minX, y: top - size.height, width: size.width, height: size.height), display: true)
     }
 
-    func show(bottomLeft: NSPoint) {
+    func show(topLeft: NSPoint) {
         model.items = world?.finished ?? []
         let size = host?.fittingSize ?? NSSize(width: 300, height: 200)
-        panel.setFrame(NSRect(origin: bottomLeft, size: size), display: true)
+        panel.setFrame(NSRect(x: topLeft.x, y: topLeft.y - size.height, width: size.width, height: size.height), display: true)
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
     }

@@ -14,7 +14,8 @@ enum Tuning {
     static let coupling: CGFloat = 0.18    // how much swinging tugs the rope
     // Hand
     static let follow: CGFloat = 24        // drag spring; lower = laggier
-    static let pluck: CGFloat = 1          // strumming the rope
-    static let brush: CGFloat = 1          // brushing past a hanging note
+    static let brush: CGFloat = 0.1        // brushing past a hanging note (kept subtle)
+    static let brushCap: CGFloat = 0.12    // max swing speed a brush can add, rad/s
+    static let nudge: CGFloat = 0.5        // swing from a click, a new note, a stamp
     static let friction: CGFloat = 4       // sliding on the desk
 }

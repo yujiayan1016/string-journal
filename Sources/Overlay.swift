@@ -2,7 +2,7 @@ import AppKit
 import QuartzCore
 
 /// Transparent, borderless panel covering the screen's visible area.
-/// It only takes the mouse while the pointer is over a note, the envelope, the "+" tag or the undo strip.
+/// It only takes the mouse while the pointer is over a note, the drift bottle, the "+" tag or the undo strip.
 final class OverlayPanel: NSPanel {
     init(frame: NSRect) {
         super.init(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -58,6 +58,8 @@ final class OverlayController {
     private var editor: EditorController?
     private var finishedPanel: FinishedController?
     private var cursorOwned = false
+    private var today = Calendar.current.startOfDay(for: Date())
+    private var lastDayCheck = CACurrentMediaTime()
 
     var floatAbove: Bool {
         get { UserDefaults.standard.object(forKey: "floatAbove") as? Bool ?? true }
@@ -123,6 +125,13 @@ final class OverlayController {
         world.updateHover()
         world.advance(dt)
 
+        // the drift bottle empties itself when a new day starts
+        if now - lastDayCheck > 5 {
+            lastDayCheck = now
+            let d = Calendar.current.startOfDay(for: Date())
+            if d != today { today = d; world.clearFinished() }
+        }
+
         let wants = world.wantsMouse(at: vp)
         if panel.ignoresMouseEvents == wants { panel.ignoresMouseEvents = !wants }
         updateCursor(wants: wants, at: vp)
@@ -137,7 +146,7 @@ final class OverlayController {
         }
         cursorOwned = true
         if world.dragging != nil { NSCursor.closedHand.set() }
-        else if world.hoverStamp != nil || world.plusHit(p) || world.basketHit(p) || world.toastButton.contains(p) { NSCursor.pointingHand.set() }
+        else if world.hoverStamp != nil || world.plusHit(p) || world.bottleHit(p) || world.toastButton.contains(p) { NSCursor.pointingHand.set() }
         else if world.hoverCard != nil { NSCursor.openHand.set() }
         else { NSCursor.arrow.set() }
     }
@@ -174,9 +183,10 @@ final class OverlayController {
 
     func toggleFinished() {
         if let f = finishedPanel, f.panel.isVisible { f.close(); return }
-        let anchor = screenPoint(CGPoint(x: world.basket.x - 74, y: world.basket.rim - 58))
+        let c = world.bottleCenter
+        let anchor = screenPoint(CGPoint(x: max(12, c.x - 30), y: c.y + 46))
         let f = finishedPanel ?? FinishedController(world: world)
         finishedPanel = f
-        f.show(bottomLeft: anchor)
+        f.show(topLeft: anchor)
     }
 }

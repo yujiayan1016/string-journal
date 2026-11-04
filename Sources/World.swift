@@ -76,9 +76,11 @@ final class Card {
 
 struct RopeNode { var x, y, px, py, fx, fy: CGFloat }
 
-struct Basket {
-    var x: CGFloat = 92, bottom: CGFloat = 0, rim: CGFloat = 0
-    var s: CGFloat = 1, sv: CGFloat = 0
+/// Drift bottle hanging from the left end of the twine; finished notes go in here.
+struct Bottle {
+    var x: CGFloat = 46
+    var ang: CGFloat = 0, av: CGFloat = 0     // gentle swing
+    var s: CGFloat = 1, sv: CGFloat = 0       // grows a little while a note hovers over it
     var hot = false
 }
 
@@ -90,7 +92,7 @@ final class World {
     var nodes: [RopeNode] = []
     var cards: [Card] = []
     var finished: [Card] = []          // newest first
-    var basket = Basket()
+    var bottle = Bottle()
     var tWorld: Double = 0
     var zTop = 1
 
@@ -131,7 +133,6 @@ final class World {
             }
         }
         buildRope()
-        basket.x = 92; basket.bottom = H - 22; basket.rim = basket.bottom - 74
         for c in cards where c.mode == .hang { c.p1 = nil; c.p2 = nil }
         poke()
     }
@@ -155,6 +156,19 @@ final class World {
         return (a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, lo, t)
     }
 
+    // rope ends are taken by the bottle (left) and the "+" tag (right)
+    var ropeLo: CGFloat { 100 + CW / 2 }
+    var ropeHi: CGFloat { W - 100 - CW / 2 }
+
+    var bottleHang: CGPoint { let r = ropeAt(bottle.x); return CGPoint(x: r.x, y: r.y) }
+    /// Bottle space (origin at the knot on the rope, y down) → screen.
+    func bottlePoint(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+        let h = bottleHang, p = rot(bottle.ang, x, y)
+        return CGPoint(x: h.x + p.x, y: h.y + p.y)
+    }
+    var bottleMouth: CGPoint { bottlePoint(0, 22) }
+    var bottleCenter: CGPoint { bottlePoint(0, 66) }
+
     private struct Slot { var id: UUID?; var x: CGFloat; var r: CGFloat = 0 }
 
     /// Resolved rope positions: no two notes closer than GAP, the hovered slot stays put.
@@ -162,7 +176,7 @@ final class World {
         var items = cards.filter { $0.mode == .hang }.map { Slot(id: $0.id, x: $0.homeX) }
         if let s = dragSlot { items.append(Slot(id: nil, x: s)) }
         items.sort { $0.x < $1.x }
-        let lo = 30 + CW / 2, hi = W - 30 - CW / 2
+        let lo = ropeLo, hi = ropeHi
         for i in items.indices { items[i].r = clamp(items[i].x, lo, hi) }
         if items.count > 1 {
             for _ in 0..<40 {
@@ -192,7 +206,7 @@ final class World {
 
     func widestGap() -> CGFloat {
         let xs = cards.filter { $0.mode == .hang }.map(\.homeX).sorted()
-        let pts = [30 + CW / 2 - GAP / 2] + xs + [W - 30 - CW / 2 + GAP / 2]
+        let pts = [ropeLo - GAP / 2] + xs + [ropeHi + GAP / 2]
         var best = W / 2, gap: CGFloat = -1
         for i in 0..<(pts.count - 1) {
             let g = pts[i + 1] - pts[i]
@@ -218,7 +232,7 @@ final class World {
             if c.stampPending { motion = 10 }
         }
         for n in nodes { motion = max(motion, abs(n.y - n.py) * 60, abs(n.x - n.px) * 60) }
-        motion = max(motion, abs(basket.sv), abs(basket.s - (basket.hot ? 1.1 : 1)) * 20)
+        motion = max(motion, abs(bottle.sv), abs(bottle.av), abs(bottle.ang) * 4, abs(bottle.s - (bottle.hot ? 1.08 : 1)) * 20)
         if motion > 0.02 || dragging != nil || toast != nil { awake = 0.4 } else { awake -= dt }
     }
     var needsRedraw: Bool { awake > 0 }
@@ -281,10 +295,12 @@ final class World {
             }
         }
 
-        // basket wobble
-        let bt: CGFloat = basket.hot ? 1.1 : 1
-        let ba = 320 * (bt - basket.s) - 2 * 0.45 * CGFloat(320).squareRoot() * basket.sv
-        basket.sv += ba * h; basket.s += basket.sv * h
+        // bottle: grows a touch while hot, swings gently when something drops in
+        let bt: CGFloat = bottle.hot ? 1.08 : 1
+        let ba = 320 * (bt - bottle.s) - 2 * 0.45 * CGFloat(320).squareRoot() * bottle.sv
+        bottle.sv += ba * h; bottle.s += bottle.sv * h
+        let aa = -16 * bottle.ang - 2.4 * bottle.av
+        bottle.av += aa * h; bottle.ang += bottle.av * h
 
         var done: [(Card, String)] = []
         for c in cards {
@@ -313,16 +329,16 @@ final class World {
                 c.piv.x += c.pv.x * h; c.piv.y += c.pv.y * h
                 c.pa = CGPoint(x: ax, y: ay)
                 pendulum(c, h)
-                let st: CGFloat = basket.hot ? 0.62 : 1
+                let st: CGFloat = bottle.hot ? 0.55 : 1
                 c.sc += (st - c.sc) * (1 - exp(-h * 14))
             case .sink:
                 c.t += h / c.dur
                 let t = min(1, c.t), e = t * t, u = 1 - e
-                let tx = basket.x, ty = basket.rim + 52
-                c.c.x = u * u * c.s0.x + 2 * u * e * c.ctrl.x + e * e * tx
-                c.c.y = u * u * c.s0.y + 2 * u * e * c.ctrl.y + e * e * ty
-                c.sc = 1 - 0.52 * e; c.th = c.th0 + c.spin * e
-                if c.t >= 1 { done.append((c, "basket")) }
+                let m = bottleMouth
+                c.c.x = u * u * c.s0.x + 2 * u * e * c.ctrl.x + e * e * m.x
+                c.c.y = u * u * c.s0.y + 2 * u * e * c.ctrl.y + e * e * m.y
+                c.sc = 1 - 0.92 * e; c.th = c.th0 + c.spin * e
+                if c.t >= 1 { done.append((c, "bottle")) }
             case .crumple:
                 c.c.x += c.v.x * h; c.c.y += c.v.y * h; c.th += c.spin * h
                 c.t += h / 0.2
@@ -372,27 +388,13 @@ final class World {
         pvel.x += (vx - pvel.x) * 0.5; pvel.y += (vy - pvel.y) * 0.5
 
         if dragging == nil && pending == nil {
-            // strum the rope
-            let r0 = ropeAt(lastPtr.x), r1 = ropeAt(ptr.x)
-            let s0 = lastPtr.y - r0.y, s1 = ptr.y - r1.y
-            if s0 * s1 < 0 && abs(vy) > 40 && ptr.x > 0 && ptr.x < W && abs(s1) < 80 {
-                let imp = clamp(vy * Tuning.pluck * 0.7, -2200, 2200)
-                let i = r1.i, hh: CGFloat = 1.0 / 240
-                for j in -4...5 {
-                    let k = i + j
-                    if k <= 0 || k >= nodes.count - 1 { continue }
-                    let f = 0.5 + 0.5 * cos(.pi * abs(CGFloat(j) - 0.5) / 5.5)
-                    nodes[k].py -= imp * f * hh
-                    nodes[k].px -= vx * 0.08 * Tuning.pluck * f * hh
-                }
-                poke()
-            }
             // brush past hanging notes
             if Tuning.brush > 0 && hypot2(vx, vy) > 30 {
                 for c in cards where c.mode == .hang && hit(c, ptr) {
                     let rx = ptr.x - c.piv.x, ry = ptr.y - c.piv.y
-                    let dw = clamp((rx * pvel.y - ry * pvel.x) / c.inertia * Tuning.brush * 0.012, -1.4, 1.4)
-                    c.om += dw
+                    let dw = clamp((rx * pvel.y - ry * pvel.x) / c.inertia * Tuning.brush * 0.012, -0.05, 0.05)
+                    // only ever a light sway
+                    if abs(c.om + dw) < Tuning.brushCap || abs(c.om + dw) < abs(c.om) { c.om += dw }
                     poke()
                 }
             }
@@ -403,11 +405,11 @@ final class World {
             let tc = CGPoint(x: c.c.x + up.x, y: c.c.y + up.y)
             let r = ropeAt(clamp(tc.x, 1, W - 1))
             let near = tc.y > r.y - 60 && tc.y < r.y + 95 && tc.x > 30 && tc.x < W - 30
-            basket.hot = hypot2(c.c.x - basket.x, c.c.y - (basket.rim + 10)) < 110
-                || hypot2(ptr.x - basket.x, ptr.y - (basket.rim + 20)) < 70
-            dragSlot = near && !basket.hot ? tc.x : nil
+            let bc = bottleCenter
+            bottle.hot = hypot2(c.c.x - bc.x, c.c.y - bc.y) < 95 || hypot2(ptr.x - bc.x, ptr.y - bc.y) < 60
+            dragSlot = near && !bottle.hot ? tc.x : nil
         } else {
-            dragSlot = nil; basket.hot = false
+            dragSlot = nil; bottle.hot = false
         }
         lastPtr = ptr
     }
@@ -431,14 +433,17 @@ final class World {
         for c in cards.filter({ $0.mode == .free }).sorted(by: { $0.z > $1.z }) where hit(c, p) { return c }
         return nil
     }
-    func basketHit(_ p: CGPoint) -> Bool { abs(p.x - basket.x) < 68 && p.y > basket.rim - 40 && p.y < basket.bottom + 6 }
+    func bottleHit(_ p: CGPoint) -> Bool {
+        let c = bottleCenter, m = bottleMouth
+        return hypot2(p.x - c.x, p.y - c.y) < 34 || (abs(p.x - m.x) < 12 && p.y > m.y - 24 && p.y < c.y)
+    }
     var plusCenter: CGPoint { let x = W - 46; return CGPoint(x: x, y: ropeAt(x).y + 30) }
     func plusHit(_ p: CGPoint) -> Bool { hypot2(p.x - plusCenter.x, p.y - plusCenter.y) < 20 }
     func toastHit(_ p: CGPoint) -> Bool { toast != nil && toastRect.contains(p) }
 
     /// Whether the overlay should take the mouse at this point (otherwise clicks pass through).
     func wantsMouse(at p: CGPoint) -> Bool {
-        dragging != nil || pending != nil || pick(p) != nil || basketHit(p) || plusHit(p) || toastHit(p)
+        dragging != nil || pending != nil || pick(p) != nil || bottleHit(p) || plusHit(p) || toastHit(p)
     }
 
     func updateHover() {
@@ -463,7 +468,7 @@ final class World {
             pending = (c, p)
             return
         }
-        if basketHit(p) { basket.sv -= 0.8; poke(); onOpenFinished?() }
+        if bottleHit(p) { bottle.av += 0.9; poke(); onOpenFinished?() }
     }
 
     func pointerDragged(_ p: CGPoint) {
@@ -479,7 +484,7 @@ final class World {
         else if let pd = pending {
             let c = pd.card
             let side: CGFloat = p.x < c.center.x ? 1 : -1
-            c.om += side * (c.mode == .hang ? 2.4 : 1.2)
+            c.om += side * Tuning.nudge * (c.mode == .hang ? 1 : 0.6)
             poke()
         }
         pending = nil
@@ -502,10 +507,11 @@ final class World {
         dragging = nil
         let d = rot(c.th, c.r0.x, c.r0.y)
         defer { dragSlot = nil; poke(); onChange?() }
-        if basket.hot {
-            basket.hot = false; c.stampPending = false
+        if bottle.hot {
+            bottle.hot = false; c.stampPending = false
             startSink(c, duration: 0.42)
-            c.ctrl = CGPoint(x: basket.x + (c.c.x - basket.x) * 0.4, y: min(c.c.y, basket.rim) - 50)
+            let m = bottleMouth
+            c.ctrl = CGPoint(x: m.x + (c.c.x - m.x) * 0.4, y: min(c.c.y, m.y) - 50)
             return
         }
         if dragSlot != nil {
@@ -521,7 +527,6 @@ final class World {
             c.c = CGPoint(x: r.x + nd.x, y: r.y + nd.y)
             c.snap = CGPoint(x: old.x - c.c.x, y: old.y - c.c.y)
             c.p1 = nil; c.p2 = nil; c.pa = .zero
-            if r.i > 0 && r.i < nodes.count - 1 { nodes[r.i].py -= 260.0 / 240 }
             return
         }
         c.mode = .free; c.sc = 1
@@ -543,8 +548,9 @@ final class World {
         if dragging === c { dragging = nil }
         c.mode = .sink; c.t = 0; c.dur = duration
         c.s0 = cc; c.c = cc; c.snap = .zero
-        c.th0 = c.th; c.spin = (cc.x > basket.x ? -1 : 1) * CGFloat.random(in: 0.6...1.4)
-        c.ctrl = CGPoint(x: cc.x + (basket.x - cc.x) * 0.25, y: min(cc.y, basket.rim) - 110)
+        let m = bottleMouth
+        c.th0 = c.th; c.spin = (cc.x > m.x ? -1 : 1) * CGFloat.random(in: 0.6...1.4)
+        c.ctrl = CGPoint(x: cc.x + (m.x - cc.x) * 0.3, y: min(cc.y, m.y) - 70)
         zTop += 1; c.z = zTop
         poke()
     }
@@ -561,11 +567,7 @@ final class World {
     func stamp(_ c: Card) {
         c.stampAt = tWorld; c.stampDate = Date()
         c.stampPending = true; c.fallAt = tWorld + 1.15
-        c.om += (Bool.random() ? -1 : 1) * (c.mode == .hang ? 1.4 : 0.5)
-        if c.mode == .hang {
-            let r = ropeAt(c.x)
-            if r.i > 0 && r.i < nodes.count - 1 { nodes[r.i].py -= 320.0 / 240 }
-        }
+        c.om += (Bool.random() ? -1 : 1) * Tuning.nudge * (c.mode == .hang ? 1 : 0.5)
         poke()
     }
 
@@ -574,7 +576,7 @@ final class World {
         if dragging === c { dragging = nil }
         c.doneAt = Date()
         finished.insert(c, at: 0)
-        basket.sv -= how == "basket" ? 2.4 : 1.2
+        bottle.av += how == "bottle" ? 1.6 : 0.8
         toast = (c, tWorld + 4.5)
         poke()
         onChange?()
@@ -584,7 +586,7 @@ final class World {
         let x = widestGap(), r = ropeAt(x)
         c.mode = .hang; c.x = x; c.homeX = x; c.vx = 0
         c.r0 = CGPoint(x: 0, y: CLIP + CH / 2)
-        c.th = CGFloat.random(in: -0.15...0.15); c.om = (Bool.random() ? -1 : 1) * 2.2
+        c.th = CGFloat.random(in: -0.06...0.06); c.om = (Bool.random() ? -1 : 1) * Tuning.nudge
         c.piv = CGPoint(x: r.x, y: r.y); c.pa = .zero; c.p1 = nil; c.p2 = nil; c.sc = 1
         c.stampAt = nil; c.stampPending = false; c.doneAt = nil
         c.c = CGPoint(x: r.x, y: r.y + CLIP + CH / 2)
@@ -596,9 +598,17 @@ final class World {
     func restore(_ c: Card) {
         finished.removeAll { $0 === c }
         if toast?.card === c { toast = nil }
-        basket.sv -= 1.5
-        hang(c, from: CGPoint(x: basket.x, y: basket.rim))
+        bottle.av -= 1.0
+        hang(c, from: bottleMouth)
         onChange?()
+    }
+
+    /// The bottle empties itself each new day and on every launch.
+    func clearFinished() {
+        guard !finished.isEmpty else { return }
+        finished.removeAll()
+        if let t = toast, !cards.contains(where: { $0 === t.card }) { toast = nil }
+        poke(); onChange?()
     }
 
     func deleteFinished(_ c: Card) {
@@ -622,7 +632,7 @@ final class World {
     func edited(_ c: Card, text: String) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         c.text = t.isEmpty ? "（空白）" : t
-        c.om += 0.8
+        c.om += Tuning.nudge * 0.5
         poke(); onChange?()
     }
 
@@ -642,8 +652,7 @@ final class World {
                 return nil   // about to be finished; saved with the finished list
             }
         }
-        let leaving = cards.filter { $0.mode == .sink || $0.mode == .crumple }
-        b.done = (leaving + finished).map { StoredDone(id: $0.id, text: $0.text, style: $0.style, doneAt: $0.doneAt ?? Date()) }
+        b.done = []   // the bottle starts empty after a restart
         return b
     }
 
@@ -665,17 +674,12 @@ final class World {
             }
             cards.append(c)
         }
-        for d in b.done {
-            let c = Card(id: d.id, text: d.text, style: d.style)
-            c.doneAt = d.doneAt
-            finished.append(c)
-        }
         poke()
     }
 
     func seedWelcome() {
         let n = welcomeNotes.count
-        let start = max(30 + CW / 2, (W - CGFloat(n - 1) * GAP) / 2)
+        let start = max(ropeLo, (W - CGFloat(n - 1) * GAP) / 2)
         for (i, t) in welcomeNotes.enumerated() {
             let c = Card(text: t, style: i)
             let x = start + CGFloat(i) * GAP
