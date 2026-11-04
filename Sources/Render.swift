@@ -86,10 +86,9 @@ final class Renderer {
         let hanging = world.cards.filter { $0.mode == .hang }
         drawGhost()
         for c in hanging { drawPaper(c, lift: 1) }
-        drawRope()
+        if !world.ropeHidden { drawRope() }
         for c in hanging { drawAttach(c) }
-        drawBottle()
-        drawPlus()
+        if world.ropeHidden { drawSinking() } else { drawBottle(); drawPlus() }
         for c in world.cards where c.mode == .crumple { drawBall(c) }
         if let d = world.dragging { drawPaper(d, lift: 2); drawAttach(d) }
         if world.bottle.hot { drawHotLabel() }
@@ -516,15 +515,18 @@ final class Renderer {
         return p
     }
 
-    private func drawBottle() {
-        let b = world.bottle, hang = world.bottleHang
-
-        // notes flying in shrink toward the mouth and fade just before they slip inside
+    /// Notes flying into the bottle shrink toward the mouth and fade just before they slip inside.
+    private func drawSinking() {
         for c in world.cards.filter({ $0.mode == .sink }).sorted(by: { $0.z < $1.z }) {
             let t = min(1, c.t)
             let a: CGFloat = t < 0.7 ? 1 : max(0, (1 - t) / 0.3)
             drawPaper(c, lift: 2, alpha: a); drawAttach(c, alpha: a)
         }
+    }
+
+    private func drawBottle() {
+        let b = world.bottle, hang = world.bottleHang
+        drawSinking()
 
         ctx.saveGState()
         ctx.translateBy(x: hang.x, y: hang.y); ctx.rotate(by: b.ang)

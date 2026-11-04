@@ -42,6 +42,7 @@ struct StoredNote: Codable {
     var deskY: Double
     var tilt: Double
     var stamped: Bool
+    var wasOnRope: Bool? = nil   // put down on the desk because the rope was hidden
 }
 
 struct StoredDone: Codable {

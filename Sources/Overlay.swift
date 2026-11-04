@@ -61,9 +61,9 @@ final class OverlayController {
     private var today = Calendar.current.startOfDay(for: Date())
     private var lastDayCheck = CACurrentMediaTime()
 
-    var floatAbove: Bool {
-        get { UserDefaults.standard.object(forKey: "floatAbove") as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "floatAbove"); applyLevel() }
+    var ropeHidden: Bool {
+        get { UserDefaults.standard.bool(forKey: "ropeHidden") }
+        set { UserDefaults.standard.set(newValue, forKey: "ropeHidden"); world.setRopeHidden(newValue) }
     }
 
     func start() {
@@ -79,6 +79,7 @@ final class OverlayController {
         world.onChange = { [weak self] in self?.scheduleSave(); self?.finishedPanel?.refresh() }
         world.onEdit = { [weak self] card in self?.openEditor(card) }
         world.onOpenFinished = { [weak self] in self?.toggleFinished() }
+        world.setRopeHidden(ropeHidden)
 
         applyLevel()
         panel.orderFrontRegardless()
@@ -102,13 +103,10 @@ final class OverlayController {
         world.resize(width: f.width, height: f.height)
     }
 
+    /// Always on the desktop layer: above the wallpaper and icons, below every app window.
     private func applyLevel() {
         guard let panel else { return }
-        if floatAbove {
-            panel.level = .floating
-        } else {
-            panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
-        }
+        panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
         panel.orderFrontRegardless()
     }
 
@@ -183,7 +181,7 @@ final class OverlayController {
 
     func toggleFinished() {
         if let f = finishedPanel, f.panel.isVisible { f.close(); return }
-        let c = world.bottleCenter
+        let c = world.ropeHidden ? CGPoint(x: 42, y: world.anchorY + 20) : world.bottleCenter
         let anchor = screenPoint(CGPoint(x: max(12, c.x - 30), y: c.y + 46))
         let f = finishedPanel ?? FinishedController(world: world)
         finishedPanel = f

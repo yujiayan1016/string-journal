@@ -19,7 +19,7 @@ private func makePaperPanel(size: NSSize) -> PaperPanel {
     p.isOpaque = false
     p.backgroundColor = .clear
     p.hasShadow = true
-    p.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
+    p.level = .normal
     p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     p.isReleasedWhenClosed = false
     p.hidesOnDeactivate = false

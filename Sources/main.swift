@@ -3,7 +3,7 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let overlay = OverlayController()
     private var statusItem: NSStatusItem!
-    private var floatItem: NSMenuItem!
+    private var ropeItem: NSMenuItem!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Fonts.register()
@@ -25,8 +25,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item("新便签", #selector(newNote), "n"))
         menu.addItem(item("已完成的便签…", #selector(showFinished), ""))
         menu.addItem(.separator())
-        floatItem = item("浮在其他窗口之上", #selector(toggleFloat), "")
-        menu.addItem(floatItem)
+        ropeItem = item("显示绳子", #selector(toggleRope), "")
+        menu.addItem(ropeItem)
         menu.addItem(item("打开数据文件夹", #selector(openData), ""))
         menu.addItem(.separator())
         menu.addItem(item("退出绳上手帐", #selector(quit), "q"))
@@ -40,12 +40,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuWillOpen(_ menu: NSMenu) {
-        floatItem.state = overlay.floatAbove ? .on : .off
+        ropeItem.state = overlay.ropeHidden ? .off : .on
     }
 
     @objc private func newNote() { overlay.newNote() }
     @objc private func showFinished() { overlay.toggleFinished() }
-    @objc private func toggleFloat() { overlay.floatAbove.toggle() }
+    @objc private func toggleRope() { overlay.ropeHidden.toggle() }
     @objc private func openData() { NSWorkspace.shared.activateFileViewerSelecting([overlay.store.url]) }
     @objc private func quit() { overlay.saveNow(); NSApp.terminate(nil) }
 

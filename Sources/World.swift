@@ -57,6 +57,7 @@ final class Card {
     var t: CGFloat = 0, dur: CGFloat = 0.4
     var s0 = CGPoint.zero, ctrl = CGPoint.zero, th0: CGFloat = 0, spin: CGFloat = 0
     var doneAt: Date?
+    var wasOnRope = false      // waiting on the desk while the rope is hidden
 
     init(id: UUID = UUID(), text: String, style: Int) {
         self.id = id; self.text = text; self.style = style
@@ -93,6 +94,8 @@ final class World {
     var cards: [Card] = []
     var finished: [Card] = []          // newest first
     var bottle = Bottle()
+    /// Rope, bottle and "+" tag hidden: notes simply lie on the desktop.
+    private(set) var ropeHidden = false
     var tWorld: Double = 0
     var zTop = 1
 
@@ -404,9 +407,9 @@ final class World {
             let up = rot(c.th, 0, -c.h / 2 * c.sc)
             let tc = CGPoint(x: c.c.x + up.x, y: c.c.y + up.y)
             let r = ropeAt(clamp(tc.x, 1, W - 1))
-            let near = tc.y > r.y - 60 && tc.y < r.y + 95 && tc.x > 30 && tc.x < W - 30
+            let near = !ropeHidden && tc.y > r.y - 60 && tc.y < r.y + 95 && tc.x > 30 && tc.x < W - 30
             let bc = bottleCenter
-            bottle.hot = hypot2(c.c.x - bc.x, c.c.y - bc.y) < 95 || hypot2(ptr.x - bc.x, ptr.y - bc.y) < 60
+            bottle.hot = !ropeHidden && (hypot2(c.c.x - bc.x, c.c.y - bc.y) < 95 || hypot2(ptr.x - bc.x, ptr.y - bc.y) < 60)
             dragSlot = near && !bottle.hot ? tc.x : nil
         } else {
             dragSlot = nil; bottle.hot = false
@@ -434,11 +437,12 @@ final class World {
         return nil
     }
     func bottleHit(_ p: CGPoint) -> Bool {
+        guard !ropeHidden else { return false }
         let c = bottleCenter, m = bottleMouth
         return hypot2(p.x - c.x, p.y - c.y) < 34 || (abs(p.x - m.x) < 12 && p.y > m.y - 24 && p.y < c.y)
     }
     var plusCenter: CGPoint { let x = W - 46; return CGPoint(x: x, y: ropeAt(x).y + 30) }
-    func plusHit(_ p: CGPoint) -> Bool { hypot2(p.x - plusCenter.x, p.y - plusCenter.y) < 20 }
+    func plusHit(_ p: CGPoint) -> Bool { !ropeHidden && hypot2(p.x - plusCenter.x, p.y - plusCenter.y) < 20 }
     func toastHit(_ p: CGPoint) -> Bool { toast != nil && toastRect.contains(p) }
 
     /// Whether the overlay should take the mouse at this point (otherwise clicks pass through).
@@ -582,13 +586,13 @@ final class World {
         onChange?()
     }
 
-    private func hang(_ c: Card, from: CGPoint) {
-        let x = widestGap(), r = ropeAt(x)
+    private func hang(_ c: Card, from: CGPoint, at spot: CGFloat? = nil) {
+        let x = spot ?? widestGap(), r = ropeAt(x)
         c.mode = .hang; c.x = x; c.homeX = x; c.vx = 0
         c.r0 = CGPoint(x: 0, y: CLIP + CH / 2)
         c.th = CGFloat.random(in: -0.06...0.06); c.om = (Bool.random() ? -1 : 1) * Tuning.nudge
         c.piv = CGPoint(x: r.x, y: r.y); c.pa = .zero; c.p1 = nil; c.p2 = nil; c.sc = 1
-        c.stampAt = nil; c.stampPending = false; c.doneAt = nil
+        c.wasOnRope = false
         c.c = CGPoint(x: r.x, y: r.y + CLIP + CH / 2)
         c.snap = CGPoint(x: from.x - c.c.x, y: from.y - c.c.y)
         if !cards.contains(where: { $0 === c }) { cards.append(c) }
@@ -598,8 +602,8 @@ final class World {
     func restore(_ c: Card) {
         finished.removeAll { $0 === c }
         if toast?.card === c { toast = nil }
-        bottle.av -= 1.0
-        hang(c, from: bottleMouth)
+        c.stampAt = nil; c.stampPending = false; c.doneAt = nil
+        if ropeHidden { putOnDesk(c) } else { bottle.av -= 1.0; hang(c, from: bottleMouth) }
         onChange?()
     }
 
@@ -620,13 +624,50 @@ final class World {
     @discardableResult
     func addNote(text: String = "新便签\n双击写点什么", edit: Bool = true) -> Card {
         let c = Card(text: text, style: cards.count + finished.count)
-        hang(c, from: .zero)
-        c.snap = CGPoint(x: 0, y: -260)
+        if ropeHidden {
+            putOnDesk(c)
+        } else {
+            hang(c, from: .zero)
+            c.snap = CGPoint(x: 0, y: -260)
+        }
         onChange?()
         if edit {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in self?.onEdit?(c) }
         }
         return c
+    }
+
+    /// A note placed loosely on the desktop, somewhere near the upper middle.
+    private func putOnDesk(_ c: Card) {
+        c.mode = .free; c.sc = 1; c.snap = .zero; c.wasOnRope = false
+        c.c = CGPoint(x: W / 2 + CGFloat.random(in: -140...140), y: H * 0.32 + CGFloat.random(in: -60...60))
+        c.v = .zero
+        c.rest = CGFloat.random(in: -0.07...0.07); c.th = c.rest + (Bool.random() ? 0.25 : -0.25); c.om = 0
+        zTop += 1; c.z = zTop
+        if !cards.contains(where: { $0 === c }) { cards.append(c) }
+        poke()
+    }
+
+    /// Hide the rope: hanging notes drop gently onto the desk where they are.
+    /// Show it again: those notes go back to their places on the rope.
+    func setRopeHidden(_ hide: Bool) {
+        guard hide != ropeHidden else { return }
+        ropeHidden = hide
+        if hide {
+            bottle.hot = false; dragSlot = nil
+            for c in cards where c.mode == .hang {
+                let cc = c.center
+                c.mode = .free; c.c = cc; c.snap = .zero; c.wasOnRope = true
+                c.v = CGPoint(x: 0, y: CGFloat.random(in: 160...280))
+                c.th = atan2(sin(c.th), cos(c.th))
+                c.rest = CGFloat.random(in: -0.07...0.07)
+            }
+        } else {
+            for c in cards where c.mode == .free && c.wasOnRope {
+                hang(c, from: c.center, at: c.homeX)
+            }
+        }
+        poke(); onChange?()
     }
 
     func edited(_ c: Card, text: String) {
@@ -646,8 +687,9 @@ final class World {
                 return StoredNote(id: c.id, text: c.text, style: c.style, onRope: true, ropeX: Double(c.homeX / W),
                                   deskX: 0, deskY: 0, tilt: 0, stamped: c.stampAt != nil)
             case .free, .drag:
-                return StoredNote(id: c.id, text: c.text, style: c.style, onRope: false, ropeX: 0,
-                                  deskX: Double(c.c.x / W), deskY: Double(c.c.y / H), tilt: Double(c.rest), stamped: c.stampAt != nil)
+                return StoredNote(id: c.id, text: c.text, style: c.style, onRope: false, ropeX: Double(c.homeX / W),
+                                  deskX: Double(c.c.x / W), deskY: Double(c.c.y / H), tilt: Double(c.rest), stamped: c.stampAt != nil,
+                                  wasOnRope: c.wasOnRope)
             case .sink, .crumple:
                 return nil   // about to be finished; saved with the finished list
             }
@@ -671,6 +713,7 @@ final class World {
                 c.mode = .free
                 c.c = CGPoint(x: clamp(CGFloat(n.deskX) * W, 40, W - 40), y: clamp(CGFloat(n.deskY) * H, 40, H - 40))
                 c.rest = CGFloat(n.tilt); c.th = c.rest
+                if n.wasOnRope == true { c.wasOnRope = true; c.homeX = CGFloat(n.ropeX) * W }
             }
             cards.append(c)
         }
