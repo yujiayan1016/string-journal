@@ -115,7 +115,6 @@ final class OverlayController {
     private var lastDayCheck = CACurrentMediaTime()
     private var wasPressed = false
     private var dragCountAtPress = 0
-    private var raisedForDrop = false
     private static let legacyFilenames = NSPasteboard.PasteboardType("NSFilenamesPboardType")
 
     var ropeHidden: Bool {
@@ -198,18 +197,6 @@ final class OverlayController {
         world.externalDrag = pressed && world.dragging == nil
             && (types.contains(.fileURL) || types.contains(Self.legacyFilenames))
 
-        // While files are being dragged in, lift the rope above other windows (e.g. the Finder
-        // window the files come from) so it can catch them; drop back to the desktop afterwards.
-        if world.externalDrag && !raisedForDrop {
-            raisedForDrop = true
-            panel.level = .floating
-            panel.orderFrontRegardless()
-            world.poke()
-        } else if !world.externalDrag && raisedForDrop {
-            raisedForDrop = false
-            applyLevel()
-        }
-
         world.updateHover()
         world.advance(dt)
 
@@ -253,6 +240,22 @@ final class OverlayController {
 
     func newNote() {
         world.addNote()
+    }
+
+    /// Hang shortcuts without dragging onto the rope (menu bar icon drop, or the open panel).
+    func addFiles(_ urls: [URL]) {
+        world.addFiles(urls)
+    }
+
+    func chooseFiles() {
+        let p = NSOpenPanel()
+        p.canChooseFiles = true
+        p.canChooseDirectories = true
+        p.allowsMultipleSelection = true
+        p.prompt = "挂上去"
+        p.message = "选择要挂到绳子上的文件或文件夹（只挂快捷方式，原文件不会移动）"
+        NSApp.activate(ignoringOtherApps: true)
+        if p.runModal() == .OK { addFiles(p.urls) }
     }
 
     private func screenPoint(_ p: CGPoint) -> NSPoint {

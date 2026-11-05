@@ -690,6 +690,25 @@ final class World {
         poke(); onChange?()
     }
 
+    /// Hang shortcuts in the widest free spots (or lay them on the desk while the rope is hidden).
+    func addFiles(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        for (i, url) in urls.prefix(8).enumerated() {
+            let info = FileShortcuts.classify(url)
+            let c = Card(text: FileShortcuts.displayName(url, kind: info.kind), style: Int.random(in: 0..<journalStyles.count))
+            c.kind = info.kind; c.url = url; c.itemCount = info.count
+            c.bookmark = FileShortcuts.bookmark(url)
+            if ropeHidden {
+                putOnDesk(c)
+                c.c.x += CGFloat(i) * 24; c.c.y += CGFloat(i) * 18
+            } else {
+                hang(c, from: CGPoint(x: W - 60, y: -CH))      // drops in from the menu bar side
+            }
+            onNeedThumbnail?(c)
+        }
+        poke(); onChange?()
+    }
+
     /// A note placed loosely on the desktop, somewhere near the upper middle.
     private func putOnDesk(_ c: Card) {
         c.mode = .free; c.sc = 1; c.snap = .zero; c.wasOnRope = false
