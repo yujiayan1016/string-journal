@@ -4,6 +4,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private let overlay = OverlayController()
     private var statusItem: NSStatusItem!
     private var ropeItem: NSMenuItem!
+    private var journalItem: NSMenuItem!
+    private var stickyItem: NSMenuItem!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Fonts.register()
@@ -31,8 +33,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         menu.addItem(item("挂上文件…", #selector(chooseFiles), "o"))
         menu.addItem(item("已完成的便签…", #selector(showFinished), ""))
         menu.addItem(.separator())
+        menu.addItem(item("全部挂回绳子", #selector(hangAllBack), ""))
+        menu.addItem(.separator())
         ropeItem = item("显示绳子", #selector(toggleRope), "")
         menu.addItem(ropeItem)
+        let style = NSMenuItem(title: "风格", action: nil, keyEquivalent: "")
+        let styleMenu = NSMenu()
+        journalItem = item("手帐", #selector(useJournal), "")
+        stickyItem = item("便利贴", #selector(useSticky), "")
+        styleMenu.addItem(journalItem); styleMenu.addItem(stickyItem)
+        style.submenu = styleMenu
+        menu.addItem(style)
         menu.addItem(item("打开数据文件夹", #selector(openData), ""))
         menu.addItem(.separator())
         menu.addItem(item("退出绳上手帐", #selector(quit), "q"))
@@ -47,6 +58,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     func menuWillOpen(_ menu: NSMenu) {
         ropeItem.state = overlay.ropeHidden ? .off : .on
+        journalItem.state = overlay.theme == .journal ? .on : .off
+        stickyItem.state = overlay.theme == .sticky ? .on : .off
     }
 
     @objc private func newNote() { overlay.newNote() }
@@ -72,6 +85,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
     @objc private func showFinished() { overlay.toggleFinished() }
     @objc private func toggleRope() { overlay.ropeHidden.toggle() }
+    @objc private func hangAllBack() { overlay.hangAllBack() }
+    @objc private func useJournal() { overlay.theme = .journal }
+    @objc private func useSticky() { overlay.theme = .sticky }
     @objc private func openData() { NSWorkspace.shared.activateFileViewerSelecting([overlay.store.url]) }
     @objc private func quit() { overlay.saveNow(); NSApp.terminate(nil) }
 

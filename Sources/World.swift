@@ -69,7 +69,9 @@ final class Card {
     /// Paper colour: notes follow their journal style, shortcuts have their own stock.
     var color: UInt32 {
         switch kind {
-        case .note: return styleDef.color
+        case .note:
+            if Theme.current == .sticky { return stickyColors[((style % stickyColors.count) + stickyColors.count) % stickyColors.count] }
+            return styleDef.color
         case .image: return 0xFCFBF8
         case .folder: return 0xD6B38A
         case .file: return 0xFBFBF7
@@ -122,6 +124,9 @@ final class World {
     private var pvel = CGPoint.zero
     var hoverCard: Card?
     var hoverStamp: Card?
+    var hoverHangBack: Card?
+    /// Short confirmation shown above a note, e.g. after copying.
+    var flash: (card: Card, text: String, until: Double)?
     var dragging: Card?
     private var pending: (card: Card, at: CGPoint)?
     var dragSlot: CGFloat?
@@ -250,6 +255,7 @@ final class World {
         let h = CGFloat(dt) / CGFloat(steps)
         for _ in 0..<steps { step(h) }
         if let t = toast, tWorld > t.until { toast = nil; poke() }
+        if let f = flash, tWorld > f.until { flash = nil; poke() }
         // stay awake while anything moves
         var motion: CGFloat = 0
         for c in cards {
@@ -259,7 +265,7 @@ final class World {
         }
         for n in nodes { motion = max(motion, abs(n.y - n.py) * 60, abs(n.x - n.px) * 60) }
         motion = max(motion, abs(bottle.sv), abs(bottle.av), abs(bottle.ang) * 4, abs(bottle.s - (bottle.hot ? 1.08 : 1)) * 20)
-        if motion > 0.02 || dragging != nil || toast != nil { awake = 0.4 } else { awake -= dt }
+        if motion > 0.02 || dragging != nil || toast != nil || flash != nil { awake = 0.4 } else { awake -= dt }
     }
     var needsRedraw: Bool { awake > 0 }
     func poke() { awake = max(awake, 0.4) }
@@ -462,6 +468,14 @@ final class World {
         for c in cards.filter({ $0.mode == .free }).sorted(by: { $0.z > $1.z }) where hit(c, p) { return c }
         return nil
     }
+    /// The little "hang back" button on a note lying on the desk.
+    func hangBackHit(_ c: Card, _ p: CGPoint) -> Bool {
+        guard c.mode == .free, !ropeHidden else { return false }
+        let cc = c.center
+        let q = rot(-c.th, p.x - cc.x, p.y - cc.y)
+        return hypot2(q.x - (c.w / 2 - 15), q.y - (-c.h / 2 + 15)) < 13
+    }
+
     func bottleHit(_ p: CGPoint) -> Bool {
         guard !ropeHidden else { return false }
         let c = bottleCenter, m = bottleMouth
@@ -487,8 +501,9 @@ final class World {
     func updateHover() {
         let hc = pick(ptr)
         let hs = hc.flatMap { stampHit($0, ptr) ? $0 : nil }
-        if hc !== hoverCard || hs !== hoverStamp { poke() }
-        hoverCard = hc; hoverStamp = hs
+        let hb = hc.flatMap { hangBackHit($0, ptr) ? $0 : nil }
+        if hc !== hoverCard || hs !== hoverStamp || hb !== hoverHangBack { poke() }
+        hoverCard = hc; hoverStamp = hs; hoverHangBack = hb
     }
 
     // MARK: pointer events
@@ -498,6 +513,7 @@ final class World {
         if toast != nil && toastButton.contains(p), let c = toast?.card { restore(c); return }
         if plusHit(p) { addNote(); return }
         if let c = pick(p) {
+            if hangBackHit(c, p) { hangBack(c); return }
             if stampHit(c, p) { stamp(c); return }
             if clickCount >= 2 {
                 pending = nil
@@ -688,6 +704,27 @@ final class World {
         }
         externalDrag = false; dragSlot = nil
         poke(); onChange?()
+    }
+
+    /// Put a note from the desk back on the rope: its old spot if it had one, else the widest gap.
+    func hangBack(_ c: Card) {
+        guard !ropeHidden, c.mode == .free else { return }
+        hang(c, from: c.center, at: c.homeX > 0 ? c.homeX : nil)
+        onChange?()
+    }
+
+    /// Every note lying on the desk goes back on the rope.
+    func hangAllBack() {
+        if ropeHidden { setRopeHidden(false) }
+        for c in cards where c.mode == .free {
+            hang(c, from: c.center, at: c.homeX > 0 ? c.homeX : nil)
+        }
+        poke(); onChange?()
+    }
+
+    func showFlash(_ c: Card, _ text: String) {
+        flash = (c, text, tWorld + 1.3)
+        poke()
     }
 
     /// Hang shortcuts in the widest free spots (or lay them on the desk while the rope is hidden).

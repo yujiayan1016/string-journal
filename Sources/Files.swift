@@ -63,6 +63,29 @@ enum FileShortcuts {
         return true
     }
 
+    /// Puts the picture itself on the clipboard (PNG + TIFF), ready to paste into any app.
+    static func copyImage(_ c: Card) -> Bool {
+        resolve(c)
+        guard let url = c.url, !c.missing, let img = NSImage(contentsOf: url), let tiff = img.tiffRepresentation else { return false }
+        let item = NSPasteboardItem()
+        if let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) {
+            item.setData(png, forType: .png)
+        }
+        item.setData(tiff, forType: .tiff)
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        return pb.writeObjects([item])
+    }
+
+    /// Copies the file itself, so pasting in Finder makes a copy of it.
+    static func copyFile(_ c: Card) -> Bool {
+        resolve(c)
+        guard let url = c.url, !c.missing else { return false }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        return pb.writeObjects([url as NSURL])
+    }
+
     static func reveal(_ c: Card) {
         resolve(c)
         guard let url = c.url, !c.missing else { return }

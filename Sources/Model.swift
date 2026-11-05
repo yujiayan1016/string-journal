@@ -1,6 +1,19 @@
 import Foundation
 import CoreGraphics
 
+// MARK: - Look
+
+/// Two looks for the same notes: hand-made journal, or classic office sticky notes.
+enum Theme: String {
+    case journal, sticky
+    static var current: Theme = Theme(rawValue: UserDefaults.standard.string(forKey: "theme") ?? "") ?? .journal {
+        didSet { UserDefaults.standard.set(current.rawValue, forKey: "theme") }
+    }
+}
+
+/// Classic sticky-note colours: canary, pink, blue, green, orange, lilac.
+let stickyColors: [UInt32] = [0xFFF07A, 0xFFB9CF, 0xA8DAF3, 0xC6EAA2, 0xFFCB86, 0xD9C7F4]
+
 // MARK: - Journal styles
 
 enum Paper: String, Codable { case kraft, grid, lined, dot, torn }

@@ -5,8 +5,12 @@ private let inkColor = Color(red: 0x2E / 255, green: 0x34 / 255, blue: 0x48 / 25
 private func swiftColor(_ hex: UInt32) -> Color {
     Color(red: Double((hex >> 16) & 0xFF) / 255, green: Double((hex >> 8) & 0xFF) / 255, blue: Double(hex & 0xFF) / 255)
 }
-private let handFont = "LXGWWenKaiTC-Regular"
-private let titleFont = "ZCOOLKuaiLe-Regular"
+private func handF(_ size: CGFloat) -> Font {
+    Theme.current == .journal ? .custom("LXGWWenKaiTC-Regular", size: size) : .system(size: size - 1)
+}
+private func titleF(_ size: CGFloat) -> Font {
+    Theme.current == .journal ? .custom("ZCOOLKuaiLe-Regular", size: size) : .system(size: size - 1, weight: .semibold)
+}
 
 /// Borderless panel that can still take keyboard focus.
 final class PaperPanel: NSPanel {
@@ -59,7 +63,7 @@ private struct EditorView: View {
             Rectangle().fill(paper)
             VStack(alignment: .leading, spacing: 8) {
                 TextEditor(text: $model.text)
-                    .font(.custom(handFont, size: 18))
+                    .font(handF(18))
                     .lineSpacing(5)
                     .foregroundColor(inkColor)
                     .scrollContentBackground(.hidden)
@@ -67,11 +71,11 @@ private struct EditorView: View {
                     .focused($focused)
                 HStack {
                     Text("第一行是标题 · Esc 取消 · ⌘↩ 保存")
-                        .font(.custom(handFont, size: 12))
+                        .font(handF(12))
                         .foregroundColor(inkColor.opacity(0.55))
                     Spacer()
                     Button(action: { done(true) }) {
-                        Text("保存").font(.custom(titleFont, size: 14)).foregroundColor(.white)
+                        Text("保存").font(titleF(14)).foregroundColor(.white)
                             .padding(.horizontal, 14).padding(.vertical, 5)
                             .background(RoundedRectangle(cornerRadius: 3).fill(inkColor))
                     }
@@ -80,7 +84,7 @@ private struct EditorView: View {
                 }
             }
             .padding(EdgeInsets(top: 26, leading: 18, bottom: 14, trailing: 18))
-            Washi(color: Color(red: 0.66, green: 0.81, blue: 0.75)).offset(y: -4)
+            if Theme.current == .journal { Washi(color: Color(red: 0.66, green: 0.81, blue: 0.75)).offset(y: -4) }
         }
         .frame(width: 330, height: 270)
         .onExitCommand { done(false) }
@@ -145,16 +149,16 @@ private struct FinishedView: View {
             Rectangle().fill(Color(red: 0.99, green: 0.988, blue: 0.973))
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text("已完成").font(.custom(titleFont, size: 19)).foregroundColor(inkColor)
+                    Text("已完成").font(titleF(19)).foregroundColor(inkColor)
                     Spacer()
-                    Text(model.items.isEmpty ? "" : "\(model.items.count) 张").font(.custom(handFont, size: 13)).foregroundColor(inkColor.opacity(0.6))
+                    Text(model.items.isEmpty ? "" : "\(model.items.count) 张").font(handF(13)).foregroundColor(inkColor.opacity(0.6))
                 }
                 .padding(.bottom, 2)
-                Text("第二天或重启后，漂流瓶会自动清空").font(.custom(handFont, size: 11)).foregroundColor(inkColor.opacity(0.45))
+                Text("第二天或重启后，漂流瓶会自动清空").font(handF(11)).foregroundColor(inkColor.opacity(0.45))
                     .padding(.bottom, 8)
                 if model.items.isEmpty {
                     Text("漂流瓶还是空的。勾选便签右下角的小方框、把便签拖进漂流瓶，或者用力甩出屏幕，完成的便签都会收在这里。")
-                        .font(.custom(handFont, size: 14)).foregroundColor(inkColor.opacity(0.6))
+                        .font(handF(14)).foregroundColor(inkColor.opacity(0.6))
                         .lineSpacing(6).fixedSize(horizontal: false, vertical: true)
                         .padding(.vertical, 6)
                 } else {
@@ -162,13 +166,13 @@ private struct FinishedView: View {
                         ForEach(Array(model.items.prefix(10)), id: \.id) { c in row(c) }
                     }
                     if model.items.count > 10 {
-                        Text("还有 \(model.items.count - 10) 张更早的").font(.custom(handFont, size: 12))
+                        Text("还有 \(model.items.count - 10) 张更早的").font(handF(12))
                             .foregroundColor(inkColor.opacity(0.5)).padding(.top, 6)
                     }
                 }
             }
             .padding(EdgeInsets(top: 24, leading: 18, bottom: 12, trailing: 14))
-            Washi(color: Color(red: 0.95, green: 0.74, blue: 0.72)).offset(y: -4)
+            if Theme.current == .journal { Washi(color: Color(red: 0.95, green: 0.74, blue: 0.72)).offset(y: -4) }
         }
         .frame(width: 300)
         .fixedSize(horizontal: false, vertical: true)
@@ -179,7 +183,7 @@ private struct FinishedView: View {
             Rectangle().fill(swiftColor(c.color)).frame(width: 13, height: 13)
                 .shadow(color: .black.opacity(0.15), radius: 1, y: 1)
             VStack(alignment: .leading, spacing: 1) {
-                Text(c.title).font(.custom(handFont, size: 16)).foregroundColor(inkColor)
+                Text(c.title).font(handF(16)).foregroundColor(inkColor)
                     .strikethrough(true, color: Color(red: 0.78, green: 0.22, blue: 0.18).opacity(0.6))
                     .lineLimit(1)
                 if let d = c.doneAt {
@@ -188,7 +192,7 @@ private struct FinishedView: View {
             }
             Spacer(minLength: 4)
             Button(action: { restore(c) }) {
-                Text("挂回").font(.custom(titleFont, size: 13)).foregroundColor(inkColor)
+                Text("挂回").font(titleF(13)).foregroundColor(inkColor)
                     .padding(.horizontal, 9).padding(.vertical, 3)
                     .background(RoundedRectangle(cornerRadius: 3).fill(Color(red: 0.97, green: 0.85, blue: 0.84)))
             }.buttonStyle(.plain)

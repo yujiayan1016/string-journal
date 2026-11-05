@@ -56,7 +56,18 @@ final class OverlayView: NSView {
             menu.addItem(MenuAction.item("编辑") { [weak self] in self?.world.onEdit?(c) })
         } else {
             menu.addItem(MenuAction.item("打开") { [weak self] in self?.world.onOpen?(c) })
+            if c.kind == .image {
+                menu.addItem(MenuAction.item("复制图片") { [weak self] in
+                    if FileShortcuts.copyImage(c) { self?.world.showFlash(c, "已复制图片") }
+                })
+            }
+            menu.addItem(MenuAction.item(c.kind == .folder ? "复制文件夹" : "复制文件") { [weak self] in
+                if FileShortcuts.copyFile(c) { self?.world.showFlash(c, "已复制") }
+            })
             menu.addItem(MenuAction.item("在访达中显示") { [weak self] in self?.world.onReveal?(c) })
+        }
+        if c.mode == .free && !world.ropeHidden {
+            menu.addItem(MenuAction.item("挂回绳子") { [weak self] in self?.world.hangBack(c) })
         }
         if c.stampAt == nil {
             menu.addItem(.separator())
@@ -221,7 +232,7 @@ final class OverlayController {
         }
         cursorOwned = true
         if world.dragging != nil { NSCursor.closedHand.set() }
-        else if world.hoverStamp != nil || world.plusHit(p) || world.bottleHit(p) || world.toastButton.contains(p) { NSCursor.pointingHand.set() }
+        else if world.hoverStamp != nil || world.hoverHangBack != nil || world.plusHit(p) || world.bottleHit(p) || world.toastButton.contains(p) { NSCursor.pointingHand.set() }
         else if world.hoverCard != nil { NSCursor.openHand.set() }
         else { NSCursor.arrow.set() }
     }
@@ -240,6 +251,16 @@ final class OverlayController {
 
     func newNote() {
         world.addNote()
+    }
+
+    func hangAllBack() {
+        if ropeHidden { ropeHidden = false }   // keeps the menu setting in step
+        world.hangAllBack()
+    }
+
+    var theme: Theme {
+        get { Theme.current }
+        set { Theme.current = newValue; world.poke(); view.needsDisplay = true }
     }
 
     /// Hang shortcuts without dragging onto the rope (menu bar icon drop, or the open panel).

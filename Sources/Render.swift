@@ -21,11 +21,15 @@ enum Fonts {
             if let url { CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil) }
         }
     }
+    /// Titles: rounded hand lettering for the journal look, system sans for sticky notes.
     static func title(_ size: CGFloat) -> NSFont {
-        NSFont(name: "ZCOOLKuaiLe-Regular", size: size) ?? .systemFont(ofSize: size, weight: .semibold)
+        if Theme.current == .sticky { return .systemFont(ofSize: size, weight: .semibold) }
+        return NSFont(name: "ZCOOLKuaiLe-Regular", size: size) ?? .systemFont(ofSize: size, weight: .semibold)
     }
+    /// Body text: neat handwriting for the journal look, system sans for sticky notes.
     static func hand(_ size: CGFloat) -> NSFont {
-        NSFont(name: "LXGWWenKaiTC-Regular", size: size) ?? .systemFont(ofSize: size)
+        if Theme.current == .sticky { return .systemFont(ofSize: size - 1) }
+        return NSFont(name: "LXGWWenKaiTC-Regular", size: size) ?? .systemFont(ofSize: size)
     }
 }
 
@@ -114,6 +118,16 @@ final class Renderer {
         let path = ropePath()
         ctx.saveGState()
         ctx.setLineCap(.round); ctx.setLineJoin(.round)
+        if Theme.current == .sticky {
+            // a plain grey cord
+            shadow(0, 3, 2.5, rgba(30, 30, 40, 0.22))
+            ctx.addPath(path); ctx.setStrokeColor(rgb(0x8C8F96)); ctx.setLineWidth(1.6); ctx.strokePath()
+            noShadow()
+            ctx.translateBy(x: 0, y: -0.5)
+            ctx.addPath(path); ctx.setStrokeColor(rgba(255, 255, 255, 0.55)); ctx.setLineWidth(0.5); ctx.strokePath()
+            ctx.restoreGState()
+            return
+        }
         // red & white baker's twine
         shadow(0, 4, 3, rgba(40, 46, 62, 0.2))
         ctx.addPath(path); ctx.setStrokeColor(rgb(0xF4EFE7)); ctx.setLineWidth(3.2); ctx.strokePath()
@@ -145,6 +159,21 @@ final class Renderer {
         let p = world.plusCenter
         let r = world.ropeAt(p.x)
         let hover = world.plusHit(world.ptr)
+        if Theme.current == .sticky {
+            ctx.saveGState()
+            ctx.setStrokeColor(rgb(0x8C8F96)); ctx.setLineWidth(1)
+            line(CGPoint(x: r.x, y: r.y), CGPoint(x: p.x, y: p.y - 14))
+            shadow(0, 2, 5, rgba(30, 30, 40, 0.22))
+            ctx.setFillColor(rgb(hover ? 0xFFFFFF : 0xF7F7F5)); dot(p, 14)
+            noShadow()
+            ctx.setStrokeColor(rgba(30, 30, 40, 0.15)); ctx.setLineWidth(1)
+            ctx.strokeEllipse(in: CGRect(x: p.x - 14, y: p.y - 14, width: 28, height: 28))
+            ctx.setStrokeColor(rgb(0x5C5F66)); ctx.setLineWidth(2); ctx.setLineCap(.round)
+            line(CGPoint(x: p.x - 5.5, y: p.y), CGPoint(x: p.x + 5.5, y: p.y))
+            line(CGPoint(x: p.x, y: p.y - 5.5), CGPoint(x: p.x, y: p.y + 5.5))
+            ctx.restoreGState()
+            return
+        }
         ctx.saveGState()
         ctx.setStrokeColor(rgb(0xF4EFE7)); ctx.setLineWidth(1.2)
         line(CGPoint(x: r.x, y: r.y), CGPoint(x: p.x, y: p.y - 15))
@@ -170,7 +199,7 @@ final class Renderer {
         p.move(to: CGPoint(x: x0 + 1.5, y: y0))
         p.addLine(to: CGPoint(x: x0 + w - 1.5, y: y0))
         p.addQuadCurve(to: CGPoint(x: x0 + w, y: y0 + 1.5), control: CGPoint(x: x0 + w, y: y0))
-        if c.kind == .note && c.styleDef.paper == .torn {
+        if c.kind == .note && Theme.current == .journal && c.styleDef.paper == .torn {
             p.addLine(to: CGPoint(x: x0 + w, y: y0 + h - 4))
             let n = 16
             for i in 1...n {
@@ -279,6 +308,8 @@ final class Renderer {
 
         if c.kind != .note {
             drawFace(c, path: path)
+        } else if Theme.current == .sticky {
+            drawStickyNote(c, path: path)
         } else {
         ctx.saveGState()
         ctx.addPath(path); ctx.clip()
@@ -338,7 +369,8 @@ final class Renderer {
             ctx.setStrokeColor(rgb(on ? SEAL : INK)); ctx.setLineWidth(1.3)
             ctx.setLineCap(.round); ctx.setLineJoin(.round)
             let s: CGFloat = 6.5
-            func j(_ k: Double) -> CGFloat { (srand(c.seed, k) - 0.5) * 1.4 }
+            let wobble: CGFloat = Theme.current == .journal ? 1.4 : 0
+            func j(_ k: Double) -> CGFloat { (srand(c.seed, k) - 0.5) * wobble }
             ctx.beginPath()
             ctx.move(to: CGPoint(x: ox - s + j(1), y: oy - s + j(2)))
             ctx.addLine(to: CGPoint(x: ox + s + j(3), y: oy - s + j(4)))
@@ -354,7 +386,71 @@ final class Renderer {
             ctx.restoreGState()
         }
         if c.stampAt != nil { drawStamp(c, alpha: alpha) }
+        // "hang back" button on desk notes, shown on hover
+        if c.mode == .free && !world.ropeHidden && world.hoverCard === c {
+            let on = world.hoverHangBack === c
+            let p = CGPoint(x: w / 2 - 15, y: -h / 2 + 15)
+            ctx.saveGState()
+            shadow(0, 1, 3, rgba(30, 30, 40, 0.25))
+            ctx.setFillColor(rgb(INK, on ? 0.95 : 0.7)); dot(p, 10)
+            noShadow()
+            ctx.setStrokeColor(rgb(0xFFFFFF)); ctx.setLineWidth(1.8); ctx.setLineCap(.round); ctx.setLineJoin(.round)
+            line(CGPoint(x: p.x, y: p.y + 4.5), CGPoint(x: p.x, y: p.y - 4.5))
+            ctx.beginPath()
+            ctx.move(to: CGPoint(x: p.x - 4, y: p.y - 0.5)); ctx.addLine(to: CGPoint(x: p.x, y: p.y - 4.5)); ctx.addLine(to: CGPoint(x: p.x + 4, y: p.y - 0.5))
+            ctx.strokePath()
+            ctx.restoreGState()
+            if on {
+                let t = text("挂回绳子", font: Fonts.title(11), color: rgb(0xFFFFFF))
+                let ts = t.size()
+                let r = CGRect(x: p.x - ts.width / 2 - 7, y: p.y - 36, width: ts.width + 14, height: 20)
+                ctx.addPath(CGPath(roundedRect: r, cornerWidth: 5, cornerHeight: 5, transform: nil))
+                ctx.setFillColor(rgb(INK, 0.9)); ctx.fillPath()
+                t.draw(at: CGPoint(x: r.minX + 7, y: r.midY - ts.height / 2))
+            }
+        }
+        if let f = world.flash, f.card === c {
+            let left = f.until - world.tWorld
+            let a = CGFloat(min(1, max(0, left / 0.3)))
+            let t = text(f.text, font: Fonts.title(12), color: rgb(0xFFFFFF))
+            let ts = t.size()
+            let r = CGRect(x: -ts.width / 2 - 9, y: -h / 2 - 30, width: ts.width + 18, height: 22)
+            ctx.saveGState(); ctx.setAlpha(alpha * a)
+            ctx.addPath(CGPath(roundedRect: r, cornerWidth: 6, cornerHeight: 6, transform: nil))
+            ctx.setFillColor(rgb(INK, 0.9)); ctx.fillPath()
+            t.draw(at: CGPoint(x: r.minX + 9, y: r.midY - ts.height / 2))
+            ctx.restoreGState()
+        }
         ctx.restoreGState()
+    }
+
+    /// Classic sticky note: flat colour, a faint adhesive strip, a lifted bottom corner.
+    private func drawStickyNote(_ c: Card, path: CGPath) {
+        let w = c.w, h = c.h, x0 = -w / 2, y0 = -h / 2
+        ctx.saveGState()
+        ctx.addPath(path); ctx.clip()
+        ctx.setFillColor(rgba(0, 0, 0, 0.035)); ctx.fill(CGRect(x: x0, y: y0, width: w, height: 24))
+        linear([rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0), rgba(0, 0, 0, 0.05)], [0, 0.45, 1],
+               CGPoint(x: 0, y: y0), CGPoint(x: 0, y: y0 + h))
+        linear([rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.08)], [0, 1],
+               CGPoint(x: x0 + w - 44, y: y0 + h - 44), CGPoint(x: x0 + w, y: y0 + h))
+        ctx.restoreGState()
+
+        let parts = c.text.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+        let title = parts.first.map(String.init) ?? ""
+        let body = parts.count > 1 ? String(parts[1]) : ""
+        let ink = NSColor(srgbRed: 0.13, green: 0.13, blue: 0.15, alpha: 1)
+        let tpara = NSMutableParagraphStyle(); tpara.lineBreakMode = .byTruncatingTail
+        NSAttributedString(string: title, attributes: [.font: NSFont.systemFont(ofSize: 15, weight: .semibold),
+                                                       .foregroundColor: ink, .paragraphStyle: tpara])
+            .draw(with: CGRect(x: x0 + 13, y: y0 + 28, width: w - 26, height: 22), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+        if !body.isEmpty {
+            let bpara = NSMutableParagraphStyle()
+            bpara.minimumLineHeight = 19; bpara.maximumLineHeight = 19
+            NSAttributedString(string: body, attributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: ink.withAlphaComponent(0.82),
+                                                          .paragraphStyle: bpara])
+                .draw(with: CGRect(x: x0 + 13, y: y0 + 53, width: w - 26, height: h - 53 - 26), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+        }
     }
 
     // MARK: file shortcut faces
@@ -506,8 +602,23 @@ final class Renderer {
         ctx.setAlpha(alpha)
         ctx.translateBy(x: cc.x + top.x, y: cc.y + top.y); ctx.rotate(by: c.th)
         if c.sc != 1 { ctx.scaleBy(x: c.sc, y: c.sc) }
-        if st.attach == .tape { drawTape(c) } else { drawPeg(st.peg) }
+        if Theme.current == .sticky { drawBinderClip() }
+        else if st.attach == .tape { drawTape(c) } else { drawPeg(st.peg) }
         ctx.restoreGState()
+    }
+
+    /// Black binder clip, wire handles folded up over the cord.
+    private func drawBinderClip() {
+        ctx.setStrokeColor(rgb(0xC9CCD2)); ctx.setLineWidth(1.6); ctx.setLineJoin(.round)
+        ctx.beginPath()
+        ctx.move(to: CGPoint(x: -7, y: 0)); ctx.addLine(to: CGPoint(x: -4, y: -CLIP - 3))
+        ctx.addLine(to: CGPoint(x: 4, y: -CLIP - 3)); ctx.addLine(to: CGPoint(x: 7, y: 0))
+        ctx.strokePath()
+        shadow(0, 2, 3, rgba(30, 30, 40, 0.3))
+        let body = CGPath(roundedRect: CGRect(x: -11, y: -2, width: 22, height: 13), cornerWidth: 2, cornerHeight: 2, transform: nil)
+        ctx.addPath(body); ctx.setFillColor(rgb(0x2B2D31)); ctx.fillPath()
+        noShadow()
+        ctx.setFillColor(rgba(255, 255, 255, 0.22)); ctx.fill(CGRect(x: -10, y: -1, width: 20, height: 2))
     }
 
     private func drawPeg(_ painted: UInt32?) {
@@ -751,6 +862,7 @@ final class Renderer {
         noShadow()
         // bit of washi tape holding it down
         ctx.saveGState()
+        if Theme.current == .sticky { ctx.setAlpha(0) }
         ctx.translateBy(x: x, y: y + h / 2); ctx.rotate(by: -0.2)
         ctx.setFillColor(rgb(0xE9C25E, 0.8)); ctx.fill(CGRect(x: -12, y: -7, width: 26, height: 14))
         ctx.restoreGState()
