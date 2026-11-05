@@ -115,6 +115,8 @@ final class OverlayController {
     private var lastDayCheck = CACurrentMediaTime()
     private var wasPressed = false
     private var dragCountAtPress = 0
+    private var raisedForDrop = false
+    private static let legacyFilenames = NSPasteboard.PasteboardType("NSFilenamesPboardType")
 
     var ropeHidden: Bool {
         get { UserDefaults.standard.bool(forKey: "ropeHidden") }
@@ -192,9 +194,21 @@ final class OverlayController {
         let dragBoard = NSPasteboard(name: .drag)
         if pressed && !wasPressed { dragCountAtPress = dragBoard.changeCount }
         wasPressed = pressed
+        let types = (pressed && dragBoard.changeCount != dragCountAtPress) ? (dragBoard.types ?? []) : []
         world.externalDrag = pressed && world.dragging == nil
-            && dragBoard.changeCount != dragCountAtPress
-            && (dragBoard.types?.contains(.fileURL) ?? false)
+            && (types.contains(.fileURL) || types.contains(Self.legacyFilenames))
+
+        // While files are being dragged in, lift the rope above other windows (e.g. the Finder
+        // window the files come from) so it can catch them; drop back to the desktop afterwards.
+        if world.externalDrag && !raisedForDrop {
+            raisedForDrop = true
+            panel.level = .floating
+            panel.orderFrontRegardless()
+            world.poke()
+        } else if !world.externalDrag && raisedForDrop {
+            raisedForDrop = false
+            applyLevel()
+        }
 
         world.updateHover()
         world.advance(dt)
