@@ -170,7 +170,7 @@ final class Renderer {
         p.move(to: CGPoint(x: x0 + 1.5, y: y0))
         p.addLine(to: CGPoint(x: x0 + w - 1.5, y: y0))
         p.addQuadCurve(to: CGPoint(x: x0 + w, y: y0 + 1.5), control: CGPoint(x: x0 + w, y: y0))
-        if c.styleDef.paper == .torn {
+        if c.kind == .note && c.styleDef.paper == .torn {
             p.addLine(to: CGPoint(x: x0 + w, y: y0 + h - 4))
             let n = 16
             for i in 1...n {
@@ -274,9 +274,12 @@ final class Renderer {
         let s = S[min(2, max(0, lift))]
         shadow(s.1, s.2, s.0, rgba(40, 46, 62, 0.22))
         let path = paperPath(c)
-        ctx.addPath(path); ctx.setFillColor(rgb(st.color)); ctx.fillPath()
+        ctx.addPath(path); ctx.setFillColor(rgb(c.color)); ctx.fillPath()
         noShadow()
 
+        if c.kind != .note {
+            drawFace(c, path: path)
+        } else {
         ctx.saveGState()
         ctx.addPath(path); ctx.clip()
         paperTexture(c)
@@ -324,6 +327,7 @@ final class Renderer {
                        options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
         }
         drawDoodle(c)
+        }
 
         // hand-drawn "done" checkbox
         if c.stampAt == nil && (c.mode == .hang || c.mode == .free) {
@@ -353,6 +357,119 @@ final class Renderer {
         ctx.restoreGState()
     }
 
+    // MARK: file shortcut faces
+
+    /// Draws a CGImage into a rect in this y-down context (CG images are y-up).
+    private func drawImage(_ img: CGImage, in r: CGRect) {
+        ctx.saveGState()
+        ctx.translateBy(x: 0, y: r.minY + r.maxY); ctx.scaleBy(x: 1, y: -1)
+        ctx.draw(img, in: r)
+        ctx.restoreGState()
+    }
+    private func fill(_ img: CGImage, into r: CGRect, aspectFill: Bool) {
+        let iw = CGFloat(img.width), ih = CGFloat(img.height)
+        guard iw > 0, ih > 0 else { return }
+        let s = aspectFill ? max(r.width / iw, r.height / ih) : min(r.width / iw, r.height / ih)
+        let w = iw * s, h = ih * s
+        drawImage(img, in: CGRect(x: r.midX - w / 2, y: r.midY - h / 2, width: w, height: h))
+    }
+    private func label(_ s: String, font: NSFont, color: CGColor, in r: CGRect, center: Bool = true) {
+        let para = NSMutableParagraphStyle()
+        para.lineBreakMode = .byTruncatingMiddle
+        para.alignment = center ? .center : .left
+        let a = NSAttributedString(string: s, attributes: [
+            .font: font, .foregroundColor: NSColor(cgColor: color) ?? .black, .paragraphStyle: para,
+        ])
+        a.draw(with: r, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+    }
+    private func washiCorner(_ p: CGPoint, _ a: CGFloat, _ color: UInt32) {
+        ctx.saveGState()
+        ctx.translateBy(x: p.x, y: p.y); ctx.rotate(by: a)
+        ctx.setFillColor(rgb(color, 0.82)); ctx.fill(CGRect(x: -13, y: -5, width: 26, height: 10))
+        ctx.restoreGState()
+    }
+
+    private func drawFace(_ c: Card, path: CGPath) {
+        let w = c.w, h = c.h, x0 = -w / 2, y0 = -h / 2
+        switch c.kind {
+        case .image:   // polaroid
+            let photo = CGRect(x: x0 + 9, y: y0 + 9, width: w - 18, height: h - 42)
+            ctx.setFillColor(rgb(0xE6E3DB)); ctx.fill(photo)
+            if let img = c.thumb {
+                ctx.saveGState(); ctx.clip(to: photo); fill(img, into: photo, aspectFill: true); ctx.restoreGState()
+            }
+            ctx.setStrokeColor(rgba(40, 46, 62, 0.12)); ctx.setLineWidth(1); ctx.stroke(photo)
+            label(c.title, font: Fonts.hand(13), color: rgb(INK, 0.85),
+                  in: CGRect(x: x0 + 12, y: y0 + h - 29, width: w - 44, height: 20), center: false)
+
+        case .folder:  // kraft document wallet
+            ctx.saveGState()
+            ctx.addPath(path); ctx.clip()
+            ctx.setLineWidth(0.7)
+            for i in 0..<60 {
+                let d = Double(i)
+                let x = x0 + srand(c.seed, d) * w, y = y0 + srand(c.seed, d + 300) * h
+                let a = srand(c.seed, d + 600) * .pi, l = 3 + srand(c.seed, d + 900) * 9
+                ctx.setStrokeColor(i % 3 != 0 ? rgba(110, 75, 35, 0.16) : rgba(255, 240, 215, 0.3))
+                line(CGPoint(x: x, y: y), CGPoint(x: x + cos(a) * l, y: y + sin(a) * l))
+            }
+            // front pocket
+            let pocket = CGMutablePath()
+            pocket.move(to: CGPoint(x: x0, y: y0 + 34))
+            pocket.addQuadCurve(to: CGPoint(x: x0 + w, y: y0 + 30), control: CGPoint(x: 0, y: y0 + 40))
+            pocket.addLine(to: CGPoint(x: x0 + w, y: y0 + h + 4)); pocket.addLine(to: CGPoint(x: x0, y: y0 + h + 4)); pocket.closeSubpath()
+            ctx.addPath(pocket); ctx.setFillColor(rgb(0xDDBE95)); ctx.fillPath()
+            ctx.addPath(pocket); ctx.setStrokeColor(rgba(110, 75, 35, 0.3)); ctx.setLineWidth(1); ctx.strokePath()
+            ctx.restoreGState()
+            // index tab
+            let tab = CGPath(roundedRect: CGRect(x: x0 + w - 56, y: y0 + 8, width: 42, height: 16), cornerWidth: 3, cornerHeight: 3, transform: nil)
+            ctx.addPath(tab); ctx.setFillColor(rgb(0xF2BCB7)); ctx.fillPath()
+            // white label
+            ctx.saveGState()
+            ctx.translateBy(x: 0, y: y0 + 78); ctx.rotate(by: -0.025)
+            shadow(0, 1, 2, rgba(40, 46, 62, 0.15))
+            ctx.setFillColor(rgb(0xFBFAF5)); ctx.fill(CGRect(x: -w / 2 + 16, y: -24, width: w - 32, height: 46))
+            noShadow()
+            label(c.title, font: Fonts.title(14), color: rgb(INK), in: CGRect(x: -w / 2 + 22, y: -19, width: w - 44, height: 20))
+            if let n = c.itemCount {
+                label("\(n) 个项目", font: Fonts.hand(11), color: rgb(INK, 0.6), in: CGRect(x: -w / 2 + 22, y: 2, width: w - 44, height: 16))
+            }
+            ctx.restoreGState()
+
+        case .file:    // a card with a quick-look preview
+            ctx.saveGState()
+            ctx.addPath(path); ctx.clip()
+            ctx.setFillColor(rgba(60, 70, 95, 0.18))
+            var y = y0 + 10
+            while y < y0 + h { var x = x0 + 10; while x < x0 + w { dot(CGPoint(x: x, y: y), 0.8); x += 11 }; y += 11 }
+            ctx.restoreGState()
+            let box = CGRect(x: x0 + 22, y: y0 + 14, width: w - 44, height: 66)
+            if let img = c.thumb {
+                fill(img, into: box, aspectFill: false)
+            }
+            washiCorner(CGPoint(x: box.minX + 6, y: box.minY + 2), -0.6, c.styleDef.tape)
+            washiCorner(CGPoint(x: box.maxX - 6, y: box.minY + 2), 0.6, c.styleDef.tape)
+            label(c.title, font: Fonts.title(14), color: rgb(INK), in: CGRect(x: x0 + 12, y: y0 + 84, width: w - 24, height: 20))
+            if !c.ext.isEmpty {
+                let t = text(c.ext, font: Fonts.hand(11), color: rgb(INK, 0.7))
+                let ts = t.size()
+                let badge = CGRect(x: x0 + 12, y: y0 + h - 27, width: ts.width + 12, height: 17)
+                ctx.addPath(CGPath(roundedRect: badge, cornerWidth: 3, cornerHeight: 3, transform: nil))
+                ctx.setFillColor(rgb(c.styleDef.marker, 0.8)); ctx.fillPath()
+                t.draw(at: CGPoint(x: badge.minX + 6, y: badge.midY - ts.height / 2))
+            }
+
+        case .note:
+            break
+        }
+        if c.missing {
+            ctx.saveGState()
+            ctx.addPath(path); ctx.setFillColor(rgba(255, 255, 255, 0.55)); ctx.fillPath()
+            label("找不到原文件", font: Fonts.title(14), color: rgb(SEAL), in: CGRect(x: x0 + 10, y: -10, width: w - 20, height: 22))
+            ctx.restoreGState()
+        }
+    }
+
     private func drawStamp(_ c: Card, alpha: CGFloat) {
         let k = CGFloat(min(1, (world.tWorld - (c.stampAt ?? 0)) / 0.14))
         let e = 1 - pow(1 - k, 3)
@@ -371,7 +488,7 @@ final class Renderer {
         drawCentered(text(ds, font: .monospacedSystemFont(ofSize: 7.5, weight: .semibold), color: rgb(SEAL)), at: CGPoint(x: 0, y: 12))
         // worn ink: specks of paper showing through
         ctx.setBlendMode(.normal)
-        ctx.setFillColor(rgb(c.styleDef.color))
+        ctx.setFillColor(rgb(c.color))
         for i in 0..<16 {
             let d = Double(i)
             let a = srand(c.seed, d) * 2 * .pi, r = 16 + srand(c.seed, d + 50) * 13
@@ -479,7 +596,7 @@ final class Renderer {
             if i == 0 { p.move(to: pt) } else { p.addLine(to: pt) }
         }
         p.closeSubpath()
-        ctx.addPath(p); ctx.setFillColor(rgb(c.styleDef.color)); ctx.fillPath()
+        ctx.addPath(p); ctx.setFillColor(rgb(c.color)); ctx.fillPath()
         noShadow()
         ctx.addPath(p); ctx.clip()
         radial([rgba(255, 255, 255, 0.45), rgba(50, 40, 30, 0.22)], [0, 1], CGPoint(x: -8, y: -10), 2, .zero, R * 1.1)
@@ -556,7 +673,7 @@ final class Renderer {
             ctx.saveGState()
             ctx.translateBy(x: x, y: y); ctx.rotate(by: (srand(c.seed, 5) - 0.5) * 0.9)
             let roll = CGPath(roundedRect: CGRect(x: -9, y: -3.5, width: 18, height: 7), cornerWidth: 3.5, cornerHeight: 3.5, transform: nil)
-            ctx.addPath(roll); ctx.setFillColor(rgb(c.styleDef.color)); ctx.fillPath()
+            ctx.addPath(roll); ctx.setFillColor(rgb(c.color)); ctx.fillPath()
             ctx.addPath(roll); ctx.setStrokeColor(rgba(60, 50, 40, 0.25)); ctx.setLineWidth(0.6); ctx.strokePath()
             ctx.setStrokeColor(rgb(SEAL, 0.8)); ctx.setLineWidth(1)
             line(CGPoint(x: 0, y: -3.5), CGPoint(x: 0, y: 3.5))

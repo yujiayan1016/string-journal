@@ -100,7 +100,7 @@ final class EditorController: NSObject, NSWindowDelegate {
         let size = NSSize(width: 330, height: 270)
         panel = makePaperPanel(size: size)
         super.init()
-        let view = EditorView(model: model, paper: swiftColor(card.styleDef.color)) { [weak self] save in
+        let view = EditorView(model: model, paper: swiftColor(card.color)) { [weak self] save in
             self?.finish(save: save)
         }
         panel.contentView = NSHostingView(rootView: view)
@@ -176,7 +176,7 @@ private struct FinishedView: View {
 
     private func row(_ c: Card) -> some View {
         HStack(spacing: 9) {
-            Rectangle().fill(swiftColor(c.styleDef.color)).frame(width: 13, height: 13)
+            Rectangle().fill(swiftColor(c.color)).frame(width: 13, height: 13)
                 .shadow(color: .black.opacity(0.15), radius: 1, y: 1)
             VStack(alignment: .leading, spacing: 1) {
                 Text(c.title).font(.custom(handFont, size: 16)).foregroundColor(inkColor)

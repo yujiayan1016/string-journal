@@ -58,6 +58,23 @@ final class Card {
     var s0 = CGPoint.zero, ctrl = CGPoint.zero, th0: CGFloat = 0, spin: CGFloat = 0
     var doneAt: Date?
     var wasOnRope = false      // waiting on the desk while the rope is hidden
+    // file shortcuts
+    var kind: CardKind = .note
+    var url: URL?
+    var bookmark: Data?
+    var thumb: CGImage?
+    var itemCount: Int?
+    var missing = false
+    var ext: String { url?.pathExtension.uppercased() ?? "" }
+    /// Paper colour: notes follow their journal style, shortcuts have their own stock.
+    var color: UInt32 {
+        switch kind {
+        case .note: return styleDef.color
+        case .image: return 0xFCFBF8
+        case .folder: return 0xD6B38A
+        case .file: return 0xFBFBF7
+        }
+    }
 
     init(id: UUID = UUID(), text: String, style: Int) {
         self.id = id; self.text = text; self.style = style
@@ -119,6 +136,12 @@ final class World {
     var onChange: (() -> Void)?
     var onEdit: ((Card) -> Void)?
     var onOpenFinished: (() -> Void)?
+    var onOpen: ((Card) -> Void)?
+    var onReveal: ((Card) -> Void)?
+    var onNeedThumbnail: ((Card) -> Void)?
+
+    /// Files are being dragged in from Finder (set by the app layer each frame).
+    var externalDrag = false
 
     /// Seconds of "keep redrawing" left; anything moving refreshes it.
     private(set) var awake: Double = 1
@@ -411,6 +434,9 @@ final class World {
             let bc = bottleCenter
             bottle.hot = !ropeHidden && (hypot2(c.c.x - bc.x, c.c.y - bc.y) < 95 || hypot2(ptr.x - bc.x, ptr.y - bc.y) < 60)
             dragSlot = near && !bottle.hot ? tc.x : nil
+        } else if externalDrag {
+            bottle.hot = false
+            dragSlot = ropeDropOK(ptr) ? ptr.x : nil
         } else {
             dragSlot = nil; bottle.hot = false
         }
@@ -445,9 +471,17 @@ final class World {
     func plusHit(_ p: CGPoint) -> Bool { !ropeHidden && hypot2(p.x - plusCenter.x, p.y - plusCenter.y) < 20 }
     func toastHit(_ p: CGPoint) -> Bool { toast != nil && toastRect.contains(p) }
 
+    /// A file dragged from Finder can be dropped in the band just around the rope.
+    func ropeDropOK(_ p: CGPoint) -> Bool {
+        guard !ropeHidden, p.x > 30, p.x < W - 30 else { return false }
+        let r = ropeAt(p.x)
+        return p.y > r.y - 50 && p.y < r.y + 160
+    }
+
     /// Whether the overlay should take the mouse at this point (otherwise clicks pass through).
     func wantsMouse(at p: CGPoint) -> Bool {
-        dragging != nil || pending != nil || pick(p) != nil || bottleHit(p) || plusHit(p) || toastHit(p)
+        if externalDrag { return ropeDropOK(p) }
+        return dragging != nil || pending != nil || pick(p) != nil || bottleHit(p) || plusHit(p) || toastHit(p)
     }
 
     func updateHover() {
@@ -466,7 +500,8 @@ final class World {
         if let c = pick(p) {
             if stampHit(c, p) { stamp(c); return }
             if clickCount >= 2 {
-                if c.stampAt == nil { pending = nil; onEdit?(c) }
+                pending = nil
+                if c.kind != .note { onOpen?(c) } else if c.stampAt == nil { onEdit?(c) }
                 return
             }
             pending = (c, p)
@@ -637,6 +672,24 @@ final class World {
         return c
     }
 
+    /// Hang shortcuts to files dropped from Finder, starting at the slot under the pointer.
+    func dropFiles(_ urls: [URL], at p: CGPoint) {
+        guard !ropeHidden, !urls.isEmpty else { return }
+        let base = slotX ?? p.x
+        let targets = layoutTargets()
+        for k in cards where k.mode == .hang { if let t = targets[k.id] { k.homeX = t } }
+        for (i, url) in urls.prefix(8).enumerated() {
+            let info = FileShortcuts.classify(url)
+            let c = Card(text: FileShortcuts.displayName(url, kind: info.kind), style: Int.random(in: 0..<journalStyles.count))
+            c.kind = info.kind; c.url = url; c.itemCount = info.count
+            c.bookmark = FileShortcuts.bookmark(url)
+            hang(c, from: CGPoint(x: p.x + CGFloat(i) * 14, y: p.y + CGFloat(i) * 10), at: base + CGFloat(i) * GAP)
+            onNeedThumbnail?(c)
+        }
+        externalDrag = false; dragSlot = nil
+        poke(); onChange?()
+    }
+
     /// A note placed loosely on the desktop, somewhere near the upper middle.
     private func putOnDesk(_ c: Card) {
         c.mode = .free; c.sc = 1; c.snap = .zero; c.wasOnRope = false
@@ -685,11 +738,13 @@ final class World {
             switch c.mode {
             case .hang:
                 return StoredNote(id: c.id, text: c.text, style: c.style, onRope: true, ropeX: Double(c.homeX / W),
-                                  deskX: 0, deskY: 0, tilt: 0, stamped: c.stampAt != nil)
+                                  deskX: 0, deskY: 0, tilt: 0, stamped: c.stampAt != nil,
+                                  kind: c.kind == .note ? nil : c.kind.rawValue, path: c.url?.path, bookmark: c.bookmark)
             case .free, .drag:
                 return StoredNote(id: c.id, text: c.text, style: c.style, onRope: false, ropeX: Double(c.homeX / W),
                                   deskX: Double(c.c.x / W), deskY: Double(c.c.y / H), tilt: Double(c.rest), stamped: c.stampAt != nil,
-                                  wasOnRope: c.wasOnRope)
+                                  wasOnRope: c.wasOnRope,
+                                  kind: c.kind == .note ? nil : c.kind.rawValue, path: c.url?.path, bookmark: c.bookmark)
             case .sink, .crumple:
                 return nil   // about to be finished; saved with the finished list
             }
@@ -703,6 +758,10 @@ final class World {
         for n in b.notes {
             let c = Card(id: n.id, text: n.text, style: n.style)
             if n.stamped { c.stampAt = -10; c.stampDate = Date() }
+            if let k = n.kind.flatMap(CardKind.init(rawValue:)), k != .note {
+                c.kind = k; c.bookmark = n.bookmark
+                c.url = n.path.map { URL(fileURLWithPath: $0) }
+            }
             if n.onRope {
                 let x = CGFloat(n.ropeX) * W
                 c.mode = .hang; c.x = x; c.homeX = x

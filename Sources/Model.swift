@@ -8,6 +8,9 @@ enum Attach: String, Codable { case peg, tape }
 enum TapePattern: String, Codable { case stripe, dot, grid }
 enum Doodle: String, Codable { case star, heart, leaf, sun }
 
+/// What hangs on the rope: a handwritten note, or a shortcut to a file / folder.
+enum CardKind: String, Codable { case note, image, folder, file }
+
 struct NoteStyle {
     let paper: Paper
     let color: UInt32
@@ -43,6 +46,9 @@ struct StoredNote: Codable {
     var tilt: Double
     var stamped: Bool
     var wasOnRope: Bool? = nil   // put down on the desk because the rope was hidden
+    var kind: String? = nil      // nil = handwritten note
+    var path: String? = nil      // file shortcut: last known location
+    var bookmark: Data? = nil    // file shortcut: finds the file again after a move or rename
 }
 
 struct StoredDone: Codable {

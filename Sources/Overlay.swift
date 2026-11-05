@@ -28,6 +28,7 @@ final class OverlayView: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
+        registerForDraggedTypes([.fileURL])
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
@@ -45,6 +46,58 @@ final class OverlayView: NSView {
     override func mouseDown(with e: NSEvent) { world.pointerDown(point(e), clickCount: e.clickCount); world.poke() }
     override func mouseDragged(with e: NSEvent) { world.pointerDragged(point(e)) }
     override func mouseUp(with e: NSEvent) { world.pointerUp(point(e)) }
+
+    // MARK: right-click menu
+
+    override func rightMouseDown(with e: NSEvent) {
+        guard let c = world.pick(point(e)) else { return }
+        let menu = NSMenu()
+        if c.kind == .note {
+            menu.addItem(MenuAction.item("编辑") { [weak self] in self?.world.onEdit?(c) })
+        } else {
+            menu.addItem(MenuAction.item("打开") { [weak self] in self?.world.onOpen?(c) })
+            menu.addItem(MenuAction.item("在访达中显示") { [weak self] in self?.world.onReveal?(c) })
+        }
+        if c.stampAt == nil {
+            menu.addItem(.separator())
+            menu.addItem(MenuAction.item("完成，放进漂流瓶") { [weak self] in self?.world.stamp(c) })
+        }
+        NSMenu.popUpContextMenu(menu, with: e, for: self)
+    }
+
+    // MARK: files dragged in from Finder
+
+    private func dropOperation(_ info: NSDraggingInfo) -> NSDragOperation {
+        let p = convert(info.draggingLocation, from: nil)
+        world.ptr = p
+        guard world.ropeDropOK(p) else { return [] }
+        return info.draggingSourceOperationMask.contains(.link) ? .link : .copy
+    }
+    override func draggingEntered(_ info: NSDraggingInfo) -> NSDragOperation { dropOperation(info) }
+    override func draggingUpdated(_ info: NSDraggingInfo) -> NSDragOperation { dropOperation(info) }
+    override func performDragOperation(_ info: NSDraggingInfo) -> Bool {
+        let p = convert(info.draggingLocation, from: nil)
+        guard world.ropeDropOK(p) else { return false }
+        let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self],
+                                                       options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        guard !urls.isEmpty else { return false }
+        world.dropFiles(urls, at: p)
+        return true
+    }
+}
+
+/// NSMenuItem that runs a closure.
+final class MenuAction: NSObject {
+    private let run: () -> Void
+    private init(_ run: @escaping () -> Void) { self.run = run }
+    @objc private func fire() { run() }
+    static func item(_ title: String, _ run: @escaping () -> Void) -> NSMenuItem {
+        let a = MenuAction(run)
+        let i = NSMenuItem(title: title, action: #selector(fire), keyEquivalent: "")
+        i.target = a
+        i.representedObject = a     // keeps the action alive as long as the item
+        return i
+    }
 }
 
 final class OverlayController {
@@ -60,6 +113,8 @@ final class OverlayController {
     private var cursorOwned = false
     private var today = Calendar.current.startOfDay(for: Date())
     private var lastDayCheck = CACurrentMediaTime()
+    private var wasPressed = false
+    private var dragCountAtPress = 0
 
     var ropeHidden: Bool {
         get { UserDefaults.standard.bool(forKey: "ropeHidden") }
@@ -79,6 +134,17 @@ final class OverlayController {
         world.onChange = { [weak self] in self?.scheduleSave(); self?.finishedPanel?.refresh() }
         world.onEdit = { [weak self] card in self?.openEditor(card) }
         world.onOpenFinished = { [weak self] in self?.toggleFinished() }
+        world.onOpen = { [weak self] c in
+            if !FileShortcuts.open(c) { self?.world.poke() }   // shows "找不到原文件"
+        }
+        world.onReveal = { c in FileShortcuts.reveal(c) }
+        world.onNeedThumbnail = { [weak self] c in
+            FileShortcuts.loadThumbnail(c) { self?.world.poke() }
+        }
+        for c in world.cards where c.kind != .note {
+            FileShortcuts.resolve(c)
+            world.onNeedThumbnail?(c)
+        }
         world.setRopeHidden(ropeHidden)
 
         applyLevel()
@@ -120,6 +186,16 @@ final class OverlayController {
         let wp = panel.convertPoint(fromScreen: NSEvent.mouseLocation)
         let vp = view.convert(wp, from: nil)
         world.ptr = vp
+
+        // a drag that started outside this app and carries files → let it land on the rope
+        let pressed = NSEvent.pressedMouseButtons & 1 != 0
+        let dragBoard = NSPasteboard(name: .drag)
+        if pressed && !wasPressed { dragCountAtPress = dragBoard.changeCount }
+        wasPressed = pressed
+        world.externalDrag = pressed && world.dragging == nil
+            && dragBoard.changeCount != dragCountAtPress
+            && (dragBoard.types?.contains(.fileURL) ?? false)
+
         world.updateHover()
         world.advance(dt)
 
