@@ -171,14 +171,38 @@ final class OverlayController {
         }
     }
 
+    // MARK: which display
+
+    /// A key that stays the same for a monitor across unplugging and reconnecting.
+    static func key(for screen: NSScreen) -> String {
+        let id = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
+        return "\(CGDisplayVendorNumber(id))-\(CGDisplayModelNumber(id))-\(CGDisplaySerialNumber(id))"
+    }
+
+    /// The display chosen in the menu; nil means the primary display (the one with the menu bar).
+    var displayKey: String? {
+        get { UserDefaults.standard.string(forKey: "displayKey") }
+        set { UserDefaults.standard.set(newValue, forKey: "displayKey"); reposition() }
+    }
+
+    /// The chosen display if it is connected, otherwise the primary one.
+    func targetScreen() -> NSScreen? {
+        if let k = displayKey, let s = NSScreen.screens.first(where: { Self.key(for: $0) == k }) { return s }
+        return NSScreen.screens.first
+    }
+    var currentScreenKey: String? { targetScreen().map(Self.key(for:)) }
+
     private func targetFrame() -> NSRect {
-        (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
+        targetScreen()?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
     }
 
     private func reposition() {
+        guard panel != nil else { return }
         let f = targetFrame()
+        guard f != panel.frame else { return }
         panel.setFrame(f, display: true)
         world.resize(width: f.width, height: f.height)
+        scheduleSave()
     }
 
     /// Always on the desktop layer: above the wallpaper and icons, below every app window.

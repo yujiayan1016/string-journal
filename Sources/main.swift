@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var ropeItem: NSMenuItem!
     private var journalItem: NSMenuItem!
     private var stickyItem: NSMenuItem!
+    private var displayItem: NSMenuItem!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Fonts.register()
@@ -44,6 +45,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         styleMenu.addItem(journalItem); styleMenu.addItem(stickyItem)
         style.submenu = styleMenu
         menu.addItem(style)
+        displayItem = NSMenuItem(title: "显示在", action: nil, keyEquivalent: "")
+        displayItem.submenu = NSMenu()
+        menu.addItem(displayItem)
         menu.addItem(item("打开数据文件夹", #selector(openData), ""))
         menu.addItem(.separator())
         menu.addItem(item("退出绳上手帐", #selector(quit), "q"))
@@ -60,6 +64,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         ropeItem.state = overlay.ropeHidden ? .off : .on
         journalItem.state = overlay.theme == .journal ? .on : .off
         stickyItem.state = overlay.theme == .sticky ? .on : .off
+        // one entry per connected display; hidden when there is only one
+        let screens = NSScreen.screens
+        let current = overlay.currentScreenKey
+        let sub = NSMenu()
+        var seen: [String: Int] = [:]
+        for (i, s) in screens.enumerated() {
+            var name = s.localizedName
+            seen[name, default: 0] += 1
+            if seen[name]! > 1 { name += " \(seen[name]!)" }
+            if i == 0 { name += "（主显示器）" }
+            let it = NSMenuItem(title: name, action: #selector(pickDisplay(_:)), keyEquivalent: "")
+            it.target = self
+            it.representedObject = OverlayController.key(for: s)
+            it.state = OverlayController.key(for: s) == current ? .on : .off
+            sub.addItem(it)
+        }
+        displayItem.submenu = sub
+        displayItem.isHidden = screens.count < 2
     }
 
     @objc private func newNote() { overlay.newNote() }
@@ -88,6 +110,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     @objc private func hangAllBack() { overlay.hangAllBack() }
     @objc private func useJournal() { overlay.theme = .journal }
     @objc private func useSticky() { overlay.theme = .sticky }
+    @objc private func pickDisplay(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String else { return }
+        // choosing the primary display stores nil, so it follows whichever display has the menu bar
+        overlay.displayKey = NSScreen.screens.first.map(OverlayController.key(for:)) == key ? nil : key
+    }
     @objc private func openData() { NSWorkspace.shared.activateFileViewerSelecting([overlay.store.url]) }
     @objc private func quit() { overlay.saveNow(); NSApp.terminate(nil) }
 
