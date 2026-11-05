@@ -4,8 +4,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private let overlay = OverlayController()
     private var statusItem: NSStatusItem!
     private var ropeItem: NSMenuItem!
-    private var journalItem: NSMenuItem!
-    private var stickyItem: NSMenuItem!
+    private var styleItem: NSMenuItem!
     private var displayItem: NSMenuItem!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -38,13 +37,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         menu.addItem(.separator())
         ropeItem = item("显示绳子", #selector(toggleRope), "")
         menu.addItem(ropeItem)
-        let style = NSMenuItem(title: "风格", action: nil, keyEquivalent: "")
-        let styleMenu = NSMenu()
-        journalItem = item("手帐", #selector(useJournal), "")
-        stickyItem = item("便利贴", #selector(useSticky), "")
-        styleMenu.addItem(journalItem); styleMenu.addItem(stickyItem)
-        style.submenu = styleMenu
-        menu.addItem(style)
+        styleItem = NSMenuItem(title: "风格", action: nil, keyEquivalent: "")
+        styleItem.submenu = NSMenu()
+        menu.addItem(styleItem)
         displayItem = NSMenuItem(title: "显示在", action: nil, keyEquivalent: "")
         displayItem.submenu = NSMenu()
         menu.addItem(displayItem)
@@ -62,8 +57,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     func menuWillOpen(_ menu: NSMenu) {
         ropeItem.state = overlay.ropeHidden ? .off : .on
-        journalItem.state = overlay.theme == .journal ? .on : .off
-        stickyItem.state = overlay.theme == .sticky ? .on : .off
+        // styles: the two built-in looks, then every imported paper set
+        let sm = NSMenu()
+        let journal = item("手帐", #selector(useJournal), "")
+        journal.state = overlay.theme == .journal ? .on : .off
+        let sticky = item("便利贴", #selector(useSticky), "")
+        sticky.state = overlay.theme == .sticky ? .on : .off
+        sm.addItem(journal); sm.addItem(sticky)
+        let sets = CustomPapers.sets()
+        if !sets.isEmpty {
+            sm.addItem(.separator())
+            for name in sets {
+                let it = NSMenuItem(title: name, action: #selector(useCustom(_:)), keyEquivalent: "")
+                it.target = self
+                it.representedObject = name
+                it.state = overlay.theme == .custom && Theme.customSet == name ? .on : .off
+                sm.addItem(it)
+            }
+        }
+        sm.addItem(.separator())
+        sm.addItem(item("导入便签纸…", #selector(importPapers), ""))
+        sm.addItem(item("打开便签纸文件夹", #selector(openPapers), ""))
+        styleItem.submenu = sm
         // one entry per connected display; hidden when there is only one
         let screens = NSScreen.screens
         let current = overlay.currentScreenKey
@@ -110,6 +125,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     @objc private func hangAllBack() { overlay.hangAllBack() }
     @objc private func useJournal() { overlay.theme = .journal }
     @objc private func useSticky() { overlay.theme = .sticky }
+    @objc private func useCustom(_ sender: NSMenuItem) {
+        if let name = sender.representedObject as? String { overlay.useCustom(name) }
+    }
+    @objc private func importPapers() { overlay.importPapers() }
+    @objc private func openPapers() { overlay.openPapersFolder() }
     @objc private func pickDisplay(_ sender: NSMenuItem) {
         guard let key = sender.representedObject as? String else { return }
         // choosing the primary display stores nil, so it follows whichever display has the menu bar

@@ -33,7 +33,9 @@ final class Card {
     let seed: Double
 
     var mode: Mode = .hang
-    let w: CGFloat = CW, h: CGFloat = CH
+    let w: CGFloat = CW
+    /// Imported paper is square so its artwork isn't cropped; everything else uses the usual size.
+    var h: CGFloat { kind == .note && Theme.paperActive ? CW : CH }
     // position along the rope
     var x: CGFloat = 0, homeX: CGFloat = 0, vx: CGFloat = 0
     // rotation
@@ -70,6 +72,7 @@ final class Card {
     var color: UInt32 {
         switch kind {
         case .note:
+            if Theme.paperActive { return CustomPapers.palette[((style % CustomPapers.palette.count) + CustomPapers.palette.count) % CustomPapers.palette.count] }
             if Theme.current == .sticky { return stickyColors[((style % stickyColors.count) + stickyColors.count) % stickyColors.count] }
             return styleDef.color
         case .image: return 0xFCFBF8
@@ -461,13 +464,27 @@ final class World {
         guard c.stampAt == nil, c.mode == .hang || c.mode == .free else { return false }
         let cc = c.center
         let q = rot(-c.th, p.x - cc.x, p.y - cc.y)
-        return hypot2(q.x - (c.w / 2 - STAMP_OFF), q.y - (c.h / 2 - STAMP_OFF)) < 13
+        let cb = checkboxCenter(c)
+        return hypot2(q.x - cb.x, q.y - cb.y) < 13
     }
     func pick(_ p: CGPoint) -> Card? {
         for c in cards.reversed() where c.mode == .hang && hit(c, p) { return c }
         for c in cards.filter({ $0.mode == .free }).sorted(by: { $0.z > $1.z }) where hit(c, p) { return c }
         return nil
     }
+    /// Where the "done" box sits on a note: bottom-right, or bottom-left on imported paper
+    /// so the artwork in the corner stays visible.
+    func checkboxCenter(_ c: Card) -> CGPoint {
+        if c.kind == .note && Theme.paperActive { return CGPoint(x: -c.w / 2 + STAMP_OFF, y: c.h / 2 - STAMP_OFF) }
+        return CGPoint(x: c.w / 2 - STAMP_OFF, y: c.h / 2 - STAMP_OFF)
+    }
+
+    /// Note sizes can change with the look; re-seat notes hanging on the rope.
+    func themeChanged() {
+        for c in cards where c.mode == .hang { c.r0 = CGPoint(x: 0, y: CLIP + c.h / 2) }
+        poke()
+    }
+
     /// The little "hang back" button on a note lying on the desk.
     func hangBackHit(_ c: Card, _ p: CGPoint) -> Bool {
         guard c.mode == .free, !ropeHidden else { return false }
@@ -640,11 +657,11 @@ final class World {
     private func hang(_ c: Card, from: CGPoint, at spot: CGFloat? = nil) {
         let x = spot ?? widestGap(), r = ropeAt(x)
         c.mode = .hang; c.x = x; c.homeX = x; c.vx = 0
-        c.r0 = CGPoint(x: 0, y: CLIP + CH / 2)
+        c.r0 = CGPoint(x: 0, y: CLIP + c.h / 2)
         c.th = CGFloat.random(in: -0.06...0.06); c.om = (Bool.random() ? -1 : 1) * Tuning.nudge
         c.piv = CGPoint(x: r.x, y: r.y); c.pa = .zero; c.p1 = nil; c.p2 = nil; c.sc = 1
         c.wasOnRope = false
-        c.c = CGPoint(x: r.x, y: r.y + CLIP + CH / 2)
+        c.c = CGPoint(x: r.x, y: r.y + CLIP + c.h / 2)
         c.snap = CGPoint(x: from.x - c.c.x, y: from.y - c.c.y)
         if !cards.contains(where: { $0 === c }) { cards.append(c) }
         poke()
@@ -822,7 +839,7 @@ final class World {
                 let x = CGFloat(n.ropeX) * W
                 c.mode = .hang; c.x = x; c.homeX = x
                 let r = ropeAt(x)
-                c.piv = CGPoint(x: r.x, y: r.y); c.c = CGPoint(x: r.x, y: r.y + CLIP + CH / 2)
+                c.piv = CGPoint(x: r.x, y: r.y); c.c = CGPoint(x: r.x, y: r.y + CLIP + c.h / 2); c.r0 = CGPoint(x: 0, y: CLIP + c.h / 2)
                 c.th = CGFloat.random(in: -0.04...0.04)
             } else {
                 c.mode = .free
@@ -843,7 +860,7 @@ final class World {
             let x = start + CGFloat(i) * GAP
             c.mode = .hang; c.x = x; c.homeX = x
             let r = ropeAt(x)
-            c.piv = CGPoint(x: r.x, y: r.y); c.c = CGPoint(x: r.x, y: r.y + CLIP + CH / 2)
+            c.piv = CGPoint(x: r.x, y: r.y); c.c = CGPoint(x: r.x, y: r.y + CLIP + c.h / 2); c.r0 = CGPoint(x: 0, y: CLIP + c.h / 2)
             c.th = CGFloat.random(in: -0.04...0.04)
             cards.append(c)
         }

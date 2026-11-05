@@ -6,10 +6,10 @@ private func swiftColor(_ hex: UInt32) -> Color {
     Color(red: Double((hex >> 16) & 0xFF) / 255, green: Double((hex >> 8) & 0xFF) / 255, blue: Double(hex & 0xFF) / 255)
 }
 private func handF(_ size: CGFloat) -> Font {
-    Theme.current == .journal ? .custom("LXGWWenKaiTC-Regular", size: size) : .system(size: size - 1)
+    Theme.current != .sticky ? .custom("LXGWWenKaiTC-Regular", size: size) : .system(size: size - 1)
 }
 private func titleF(_ size: CGFloat) -> Font {
-    Theme.current == .journal ? .custom("ZCOOLKuaiLe-Regular", size: size) : .system(size: size - 1, weight: .semibold)
+    Theme.current != .sticky ? .custom("ZCOOLKuaiLe-Regular", size: size) : .system(size: size - 1, weight: .semibold)
 }
 
 /// Borderless panel that can still take keyboard focus.
@@ -84,7 +84,7 @@ private struct EditorView: View {
                 }
             }
             .padding(EdgeInsets(top: 26, leading: 18, bottom: 14, trailing: 18))
-            if Theme.current == .journal { Washi(color: Color(red: 0.66, green: 0.81, blue: 0.75)).offset(y: -4) }
+            if Theme.current != .sticky { Washi(color: Color(red: 0.66, green: 0.81, blue: 0.75)).offset(y: -4) }
         }
         .frame(width: 330, height: 270)
         .onExitCommand { done(false) }
@@ -172,7 +172,7 @@ private struct FinishedView: View {
                 }
             }
             .padding(EdgeInsets(top: 24, leading: 18, bottom: 12, trailing: 14))
-            if Theme.current == .journal { Washi(color: Color(red: 0.95, green: 0.74, blue: 0.72)).offset(y: -4) }
+            if Theme.current != .sticky { Washi(color: Color(red: 0.95, green: 0.74, blue: 0.72)).offset(y: -4) }
         }
         .frame(width: 300)
         .fixedSize(horizontal: false, vertical: true)

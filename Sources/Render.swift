@@ -134,7 +134,7 @@ final class Renderer {
         noShadow()
         ctx.setLineCap(.butt)
         ctx.setLineDash(phase: 0, lengths: [2.6, 3.2])
-        ctx.addPath(path); ctx.setStrokeColor(rgb(SEAL)); ctx.setLineWidth(3.2); ctx.strokePath()
+        ctx.addPath(path); ctx.setStrokeColor(rgb(Theme.paperActive ? 0x8FB4E3 : SEAL)); ctx.setLineWidth(3.2); ctx.strokePath()
         ctx.setLineDash(phase: 0, lengths: [])
         ctx.translateBy(x: 0, y: -0.8)
         ctx.addPath(path); ctx.setStrokeColor(rgba(255, 255, 255, 0.35)); ctx.setLineWidth(0.8); ctx.strokePath()
@@ -146,7 +146,7 @@ final class Renderer {
         let r = world.ropeAt(sx)
         ctx.saveGState()
         ctx.translateBy(x: r.x, y: r.y + CLIP)
-        let rect = CGRect(x: -CW / 2, y: 0, width: CW, height: CH)
+        let rect = CGRect(x: -CW / 2, y: 0, width: CW, height: world.dragging?.h ?? CH)
         let p = CGPath(roundedRect: rect, cornerWidth: 4, cornerHeight: 4, transform: nil)
         ctx.addPath(p); ctx.setFillColor(rgba(255, 255, 255, 0.3)); ctx.fillPath()
         ctx.setLineDash(phase: 0, lengths: [5, 5])
@@ -308,6 +308,8 @@ final class Renderer {
 
         if c.kind != .note {
             drawFace(c, path: path)
+        } else if Theme.paperActive, let img = CustomPapers.image(for: c) {
+            drawPaperNote(c, img, path: path)
         } else if Theme.current == .sticky {
             drawStickyNote(c, path: path)
         } else {
@@ -362,7 +364,8 @@ final class Renderer {
 
         // hand-drawn "done" checkbox
         if c.stampAt == nil && (c.mode == .hang || c.mode == .free) {
-            let ox = w / 2 - STAMP_OFF, oy = h / 2 - STAMP_OFF
+            let cb = world.checkboxCenter(c)
+            let ox = cb.x, oy = cb.y
             let on = world.hoverStamp === c, near = world.hoverCard === c
             ctx.saveGState()
             ctx.setAlpha(alpha * (on ? 0.95 : near ? 0.6 : 0.28))
@@ -422,6 +425,43 @@ final class Renderer {
             ctx.restoreGState()
         }
         ctx.restoreGState()
+    }
+
+    /// Imported paper: the artwork fills the square note; text flows in the open area
+    /// and steers around the bottom-right corner where the illustration usually sits.
+    private func drawPaperNote(_ c: Card, _ img: CGImage, path: CGPath) {
+        let w = c.w, h = c.h, x0 = -w / 2, y0 = -h / 2
+        ctx.saveGState()
+        ctx.addPath(path); ctx.clip()
+        fill(img, into: CGRect(x: x0, y: y0, width: w, height: h), aspectFill: true)
+        ctx.restoreGState()
+
+        let parts = c.text.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+        let title = parts.first.map(String.init) ?? ""
+        let body = parts.count > 1 ? String(parts[1]) : ""
+        let tpara = NSMutableParagraphStyle(); tpara.lineBreakMode = .byTruncatingTail
+        NSAttributedString(string: title, attributes: [
+            .font: Fonts.title(16), .foregroundColor: NSColor(cgColor: rgb(INK)) ?? .black, .paragraphStyle: tpara,
+        ]).draw(with: CGRect(x: x0 + 16, y: y0 + 22, width: w - 40, height: 22), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+        guard !body.isEmpty else { return }
+
+        let bpara = NSMutableParagraphStyle()
+        bpara.minimumLineHeight = 19; bpara.maximumLineHeight = 19
+        let storage = NSTextStorage(string: body, attributes: [
+            .font: Fonts.hand(14), .foregroundColor: NSColor(cgColor: rgb(INK, 0.85)) ?? .black, .paragraphStyle: bpara,
+        ])
+        let layout = NSLayoutManager()
+        storage.addLayoutManager(layout)
+        let origin = CGPoint(x: x0 + 16, y: y0 + 48)
+        let box = NSTextContainer(size: CGSize(width: w - 30, height: h - 48 - 30))
+        box.lineFragmentPadding = 0
+        box.maximumNumberOfLines = 5
+        box.lineBreakMode = .byTruncatingTail
+        // keep clear of the artwork in the bottom-right corner
+        let artX = w * 0.54 - 16, artY = h * 0.5 - 48
+        box.exclusionPaths = [NSBezierPath(rect: NSRect(x: artX, y: artY, width: w, height: h))]
+        layout.addTextContainer(box)
+        layout.drawGlyphs(forGlyphRange: layout.glyphRange(for: box), at: origin)
     }
 
     /// Classic sticky note: flat colour, a faint adhesive strip, a lifted bottom corner.
@@ -571,7 +611,8 @@ final class Renderer {
         let e = 1 - pow(1 - k, 3)
         let s = 1.9 - 0.9 * e
         ctx.saveGState()
-        ctx.translateBy(x: c.w / 2 - 44, y: c.h / 2 - 36); ctx.rotate(by: -0.24); ctx.scaleBy(x: s, y: s)
+        let stampX: CGFloat = (c.kind == .note && Theme.paperActive) ? -c.w / 2 + 48 : c.w / 2 - 44
+        ctx.translateBy(x: stampX, y: c.h / 2 - 36); ctx.rotate(by: -0.24); ctx.scaleBy(x: s, y: s)
         ctx.setAlpha(alpha * 0.82 * k)
         ctx.setBlendMode(.multiply)
         ctx.setStrokeColor(rgb(SEAL))
@@ -603,6 +644,7 @@ final class Renderer {
         ctx.translateBy(x: cc.x + top.x, y: cc.y + top.y); ctx.rotate(by: c.th)
         if c.sc != 1 { ctx.scaleBy(x: c.sc, y: c.sc) }
         if Theme.current == .sticky { drawBinderClip() }
+        else if Theme.paperActive && c.kind == .note { drawPeg(c.style % 2 == 0 ? 0xA8C8EE : 0xF5D77A) }
         else if st.attach == .tape { drawTape(c) } else { drawPeg(st.peg) }
         ctx.restoreGState()
     }

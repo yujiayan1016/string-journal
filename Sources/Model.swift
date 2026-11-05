@@ -6,6 +6,7 @@ import CoreGraphics
 /// Two looks for the same notes: hand-made journal, or classic office sticky notes.
 enum Theme: String {
     case journal, sticky
+    case custom      // the user's own imported note paper
     static var current: Theme = Theme(rawValue: UserDefaults.standard.string(forKey: "theme") ?? "") ?? .journal {
         didSet { UserDefaults.standard.set(current.rawValue, forKey: "theme") }
     }

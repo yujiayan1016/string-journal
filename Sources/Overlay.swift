@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 import QuartzCore
 
 /// Transparent, borderless panel covering the screen's visible area.
@@ -134,6 +135,7 @@ final class OverlayController {
     }
 
     func start() {
+        if Theme.current == .custom { CustomPapers.load(Theme.customSet) }
         let frame = targetFrame()
         panel = OverlayPanel(frame: frame)
         view = OverlayView(world: world)
@@ -284,7 +286,35 @@ final class OverlayController {
 
     var theme: Theme {
         get { Theme.current }
-        set { Theme.current = newValue; world.poke(); view.needsDisplay = true }
+        set {
+            Theme.current = newValue
+            if newValue == .custom { CustomPapers.load(Theme.customSet) }
+            world.themeChanged(); view.needsDisplay = true
+        }
+    }
+
+    func useCustom(_ name: String) {
+        Theme.customSet = name
+        CustomPapers.load(name, force: true)
+        theme = .custom
+    }
+
+    /// Pick a folder of images (or several images); they become a new note-paper style.
+    func importPapers() {
+        let p = NSOpenPanel()
+        p.canChooseFiles = true
+        p.canChooseDirectories = true
+        p.allowsMultipleSelection = true
+        p.allowedContentTypes = [.image, .folder]
+        p.prompt = "导入"
+        p.message = "选择一个装着便签纸图片的文件夹（或几张图片）。文件夹名就是风格名；图片只保存在这台 Mac 上。"
+        NSApp.activate(ignoringOtherApps: true)
+        guard p.runModal() == .OK, let name = CustomPapers.importPapers(p.urls) else { return }
+        useCustom(name)
+    }
+
+    func openPapersFolder() {
+        NSWorkspace.shared.open(CustomPapers.root)
     }
 
     /// Hang shortcuts without dragging onto the rope (menu bar icon drop, or the open panel).
