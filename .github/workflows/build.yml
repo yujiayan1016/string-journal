@@ -27,6 +27,20 @@ jobs:
           name: StringJournal
           path: build/StringJournal-*.zip
       # every push to main refreshes the download on the Releases page
+      # release text = docs/release-notes/<VERSION>.md (if any) + install steps
+      - name: Release notes
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          NOTES="docs/release-notes/$VERSION.md"
+          {
+            if [ -f "$NOTES" ]; then cat "$NOTES"; echo; echo "---"; echo; echo "## 安装"; echo; fi
+            echo "下载下面的 \`StringJournal-$VERSION.zip\`，解压后把「绳上手帐.app」拖进「应用程序」。"
+            echo
+            echo "第一次打开会提示无法验证开发者：到 系统设置 → 隐私与安全性，点「仍要打开」。"
+            echo "或者在终端运行：\`xattr -dr com.apple.quarantine \"/Applications/绳上手帐.app\"\`"
+            echo
+            echo "需要 macOS 13 或更新版本，支持 Apple 芯片和 Intel。"
+          } > build/release-notes.md
       - name: Publish release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
@@ -36,10 +50,4 @@ jobs:
           target_commitish: ${{ github.sha }}
           make_latest: true
           files: build/StringJournal-${{ env.VERSION }}.zip
-          body: |
-            下载下面的 `StringJournal-${{ env.VERSION }}.zip`，解压后把「绳上手帐.app」拖进「应用程序」。
-
-            第一次打开会提示无法验证开发者：到 系统设置 → 隐私与安全性，点「仍要打开」。
-            或者在终端运行：`xattr -dr com.apple.quarantine "/Applications/绳上手帐.app"`
-
-            需要 macOS 13 或更新版本，支持 Apple 芯片和 Intel。
+          body_path: build/release-notes.md
