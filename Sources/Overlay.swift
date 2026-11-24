@@ -21,8 +21,10 @@ final class OverlayPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
-final class OverlayView: NSView {
+final class OverlayView: NSView, NSDraggingSource {
     let world: World
+    /// The stand-in file carried by a drag to the Trash, and the folder it lives in.
+    private var trashFile: URL?
 
     init(world: World) {
         self.world = world
@@ -45,8 +47,85 @@ final class OverlayView: NSView {
 
     private func point(_ e: NSEvent) -> CGPoint { convert(e.locationInWindow, from: nil) }
     override func mouseDown(with e: NSEvent) { world.pointerDown(point(e), clickCount: e.clickCount); world.poke() }
-    override func mouseDragged(with e: NSEvent) { world.pointerDragged(point(e)) }
+    override func mouseDragged(with e: NSEvent) {
+        world.pointerDragged(point(e))
+        // a note pulled past the edge where the Dock is becomes a real drag, so it can be dropped on the Trash
+        if let c = world.dragging, let f = window?.frame, Self.dockDistance(NSEvent.mouseLocation, in: f) <= 1 {
+            beginTrashDrag(c, event: e)
+        }
+    }
     override func mouseUp(with e: NSEvent) { world.pointerUp(point(e)) }
+
+    // MARK: drag to the Trash
+
+    /// Which side of the screen the Dock is on (System Settings → Desktop & Dock).
+    static func dockEdge() -> NSRectEdge {
+        switch UserDefaults(suiteName: "com.apple.dock")?.string(forKey: "orientation") {
+        case "left": return .minX
+        case "right": return .maxX
+        default: return .minY
+        }
+    }
+
+    /// How far a screen point is from the overlay's edge on the Dock side (≤ 0 once past it).
+    static func dockDistance(_ sp: NSPoint, in f: NSRect) -> CGFloat {
+        switch dockEdge() {
+        case .minX: return sp.x - f.minX
+        case .maxX: return f.maxX - sp.x
+        default: return sp.y - f.minY
+        }
+    }
+
+    /// A plain-text copy of the note: it is what lands in the Trash, so a note deleted by mistake can still be read.
+    static func writeStandIn(for c: Card) -> URL? {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("StringJournal-Trash", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        var name = c.title.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+        if name.count > 60 { name = String(name.prefix(60)) }
+        if c.kind != .note { name += "（快捷方式）" }
+        let url = dir.appendingPathComponent(name + ".txt")
+        var body = c.text
+        if c.kind != .note, let path = c.url?.path { body += "\n\n绳上手帐里的快捷方式，原文件没有被删除：\n" + path }
+        do { try body.write(to: url, atomically: true, encoding: .utf8) } catch { return nil }
+        return url
+    }
+
+    private func beginTrashDrag(_ c: Card, event e: NSEvent) {
+        guard trashFile == nil, let url = Self.writeStandIn(for: c) else { return }
+        // picture of the note as it looks right now
+        let cc = c.center
+        let side = ceil(hypot2(c.w, c.h) * max(1, c.sc)) + 50
+        let img = NSImage(size: NSSize(width: side, height: side), flipped: true) { [world] _ in
+            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+            ctx.translateBy(x: side / 2 - cc.x, y: side / 2 - cc.y)
+            let r = Renderer(ctx: ctx, world: world)
+            r.drawPaper(c, lift: 2); r.drawAttach(c)
+            return true
+        }
+        guard world.liftForSystemDrag() != nil else { return }
+        trashFile = url
+        let item = NSDraggingItem(pasteboardWriter: url as NSURL)
+        item.setDraggingFrame(NSRect(x: cc.x - side / 2, y: cc.y - side / 2, width: side, height: side), contents: img)
+        let session = beginDraggingSession(with: [item], event: e, source: self)
+        session.animatesToStartingPositionsOnCancelOrFail = false
+    }
+
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        // only the Trash (delete) or a copy elsewhere; never back onto our own rope as a "file"
+        context == .outsideApplication ? [.copy, .delete] : []
+    }
+
+    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        guard let url = trashFile else { return }
+        trashFile = nil
+        let deleted = operation == .delete || !FileManager.default.fileExists(atPath: url.path)
+        var p = CGPoint(x: bounds.midX, y: bounds.maxY - 80)
+        if let w = window { p = convert(w.convertPoint(fromScreen: screenPoint), from: nil) }
+        world.endSystemDrag(deleted: deleted, at: p)
+        try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+    }
 
     // MARK: right-click menu
 
@@ -55,6 +134,11 @@ final class OverlayView: NSView {
         let menu = NSMenu()
         if c.kind == .note {
             menu.addItem(MenuAction.item("编辑") { [weak self] in self?.world.onEdit?(c) })
+            menu.addItem(MenuAction.item("复制文字") { [weak self] in
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(c.text, forType: .string)
+                self?.world.showFlash(c, "已复制文字")
+            })
         } else {
             menu.addItem(MenuAction.item("打开") { [weak self] in self?.world.onOpen?(c) })
             if c.kind == .image {
@@ -74,12 +158,45 @@ final class OverlayView: NSView {
             menu.addItem(.separator())
             menu.addItem(MenuAction.item("完成，放进漂流瓶") { [weak self] in self?.world.stamp(c) })
         }
+        if c.kind == .note && !Theme.paperActive {
+            let colors = NSMenuItem(title: "颜色", action: nil, keyEquivalent: "")
+            let sub = NSMenu()
+            let auto = MenuAction.item("跟随风格") { [weak self] in self?.world.setColor(c, nil) }
+            auto.state = c.customColor.map { cc in Theme.current == .christmas && !christmasPalette.contains { $0.hex == cc } } ?? true ? .on : .off
+            sub.addItem(auto); sub.addItem(.separator())
+            for p in notePalette {
+                let it = MenuAction.item(p.name) { [weak self] in self?.world.setColor(c, p.hex) }
+                it.image = Self.swatchImage(p.hex)
+                it.state = c.customColor == p.hex ? .on : .off
+                sub.addItem(it)
+            }
+            if Theme.current != .christmas {
+                sub.addItem(.separator())
+                sub.addItem(MenuAction.item("自定义…（在编辑框里选）") { [weak self] in self?.world.onEdit?(c) })
+            }
+            colors.submenu = sub
+            menu.addItem(colors)
+        }
+        menu.addItem(.separator())
+        menu.addItem(MenuAction.item(c.kind == .note ? "扔进废纸篓" : "取下快捷方式（原文件不动）") { [weak self] in
+            self?.world.throwInTrash(c)
+        })
         NSMenu.popUpContextMenu(menu, with: e, for: self)
+    }
+
+    static func swatchImage(_ hex: UInt32) -> NSImage {
+        NSImage(size: NSSize(width: 12, height: 12), flipped: false) { r in
+            let p = NSBezierPath(ovalIn: r.insetBy(dx: 0.5, dy: 0.5))
+            NSColor(cgColor: rgb(hex))?.setFill(); p.fill()
+            NSColor.black.withAlphaComponent(0.2).setStroke(); p.lineWidth = 0.5; p.stroke()
+            return true
+        }
     }
 
     // MARK: files dragged in from Finder
 
     private func dropOperation(_ info: NSDraggingInfo) -> NSDragOperation {
+        guard info.draggingSource == nil else { return [] }   // our own note on its way to the Trash
         let p = convert(info.draggingLocation, from: nil)
         world.ptr = p
         guard world.ropeDropOK(p) else { return [] }
@@ -88,6 +205,7 @@ final class OverlayView: NSView {
     override func draggingEntered(_ info: NSDraggingInfo) -> NSDragOperation { dropOperation(info) }
     override func draggingUpdated(_ info: NSDraggingInfo) -> NSDragOperation { dropOperation(info) }
     override func performDragOperation(_ info: NSDraggingInfo) -> Bool {
+        guard info.draggingSource == nil else { return false }
         let p = convert(info.draggingLocation, from: nil)
         guard world.ropeDropOK(p) else { return false }
         let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self],
@@ -122,6 +240,12 @@ final class OverlayController {
     private var saveWork: DispatchWorkItem?
     private var editor: EditorController?
     private var finishedPanel: FinishedController?
+    private var guideCard: GuideCardController?
+    /// Shown in the welcome card, and lit up in the menu bar while that card is open.
+    var menuIcon: NSImage?
+    var onHighlightMenuIcon: ((Bool) -> Void)?
+    /// While the guide runs the rope floats above all windows, so nobody has to clear their desktop first.
+    private var guideRaised = false { didSet { applyLevel() } }
     private var cursorOwned = false
     private var today = Calendar.current.startOfDay(for: Date())
     private var lastDayCheck = CACurrentMediaTime()
@@ -143,15 +267,27 @@ final class OverlayController {
         view.autoresizingMask = [.width, .height]
         panel.contentView = view
         world.resize(width: frame.width, height: frame.height)
-        if let book = store.load() { world.load(book) } else { world.seedWelcome(); scheduleSave() }
+        let firstRun: Bool
+        if let book = store.load() { world.load(book); firstRun = false } else { world.seedWelcome(); scheduleSave(); firstRun = true }
 
         world.onChange = { [weak self] in self?.scheduleSave(); self?.finishedPanel?.refresh() }
         world.onEdit = { [weak self] card in self?.openEditor(card) }
         world.onOpenFinished = { [weak self] in self?.toggleFinished() }
+        world.onGuideEnd = { [weak self] completed in self?.guideEnded(completed: completed) }
         world.onOpen = { [weak self] c in
             if !FileShortcuts.open(c) { self?.world.poke() }   // shows "找不到原文件"
         }
         world.onReveal = { c in FileShortcuts.reveal(c) }
+        world.trashTarget = { [weak self] in self?.dockTrashPoint() ?? .zero }
+        world.onTrashed = { c in
+            // a plain-text copy goes into the real Trash, so a mistake can still be read back
+            if c.kind == .note, c.text != trashPracticeText, c.text != practiceNoteText, let url = OverlayView.writeStandIn(for: c) {
+                try? FileManager.default.trashItem(at: url, resultingItemURL: nil)
+                try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+            }
+            let sound = "/System/Library/Components/CoreAudio.component/Contents/SharedSupport/SystemSounds/dock/drag to trash.aif"
+            (NSSound(contentsOfFile: sound, byReference: true) ?? NSSound(named: "Pop"))?.play()
+        }
         world.onNeedThumbnail = { [weak self] c in
             FileShortcuts.loadThumbnail(c) { self?.world.poke() }
         }
@@ -171,6 +307,77 @@ final class OverlayController {
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             self?.reposition()
         }
+
+        if firstRun {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.showGuide() }
+        }
+    }
+
+    // MARK: guide
+
+    private var floatingCardLevel: NSWindow.Level { NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1) }
+
+    /// Opens the welcome card; from the menu this starts the guide over.
+    func showGuide() {
+        world.endGuide(completed: false, notify: false)
+        guideCard?.close()
+        guideRaised = true
+        let screen = targetFrame()
+        guideCard = GuideCardController(card: guideWelcomeCard, icon: menuIcon, on: screen, level: floatingCardLevel,
+            primary: { [weak self] in self?.beginGuideSteps() },
+            secondary: { [weak self] in self?.closeGuide() })
+        guideCard?.show()
+        onHighlightMenuIcon?(true)
+    }
+
+    private func beginGuideSteps() {
+        guideCard?.close(); guideCard = nil
+        onHighlightMenuIcon?(false)
+        if ropeHidden { ropeHidden = false }
+        world.startGuide()
+    }
+
+    private func guideEnded(completed: Bool) {
+        guard completed else { closeGuide(); return }
+        // let the note land in the bottle before the closing card appears
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) { [weak self] in
+            guard let self, self.guideRaised, self.world.guideStep == nil else { return }
+            self.guideCard = GuideCardController(card: guideDoneCard, icon: self.menuIcon, on: self.targetFrame(), level: self.floatingCardLevel,
+                primary: { [weak self] in self?.closeGuide() }, secondary: {})
+            self.guideCard?.show()
+        }
+    }
+
+    private func closeGuide() {
+        guideCard?.close(); guideCard = nil
+        onHighlightMenuIcon?(false)
+        guideRaised = false
+    }
+
+    // MARK: Trash in the Dock
+
+    /// Rough spot of the Trash icon, in overlay coordinates. Worked out from the Dock's settings
+    /// (side, icon size, number of icons) because the exact frame needs accessibility access.
+    func dockTrashPoint() -> CGPoint {
+        guard let screen = targetScreen() else { return CGPoint(x: world.W * 0.7, y: world.H + 80) }
+        let f = screen.frame, pf = panel.frame
+        let dock = UserDefaults(suiteName: "com.apple.dock")
+        var tile = CGFloat(dock?.double(forKey: "tilesize") ?? 0); if tile < 16 { tile = 48 }
+        let apps = (dock?.array(forKey: "persistent-apps")?.count ?? 0) + 1           // + Finder
+        let others = dock?.array(forKey: "persistent-others")?.count ?? 0
+        let showRecents = dock?.object(forKey: "show-recents") as? Bool ?? true
+        let recents = showRecents ? min(3, dock?.array(forKey: "recent-apps")?.count ?? 3) : 0
+        let running = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }.count
+        let extra = max(0, running - apps) / 2
+        let length = CGFloat(apps + others + recents + extra + 1) * tile * 1.08 + 24
+        var sp: CGPoint
+        switch OverlayView.dockEdge() {
+        case .minX: sp = CGPoint(x: f.minX + tile / 2, y: f.midY - length / 2 + tile / 2)
+        case .maxX: sp = CGPoint(x: f.maxX - tile / 2, y: f.midY - length / 2 + tile / 2)
+        default: sp = CGPoint(x: min(f.maxX - tile, f.midX + length / 2 - tile / 2), y: f.minY + tile / 2)
+        }
+        // overlay view is y-down from the panel's top-left
+        return CGPoint(x: sp.x - pf.minX, y: pf.maxY - sp.y)
     }
 
     // MARK: which display
@@ -207,10 +414,10 @@ final class OverlayController {
         scheduleSave()
     }
 
-    /// Always on the desktop layer: above the wallpaper and icons, below every app window.
+    /// On the desktop layer: above the wallpaper and icons, below every app window (except during the guide).
     private func applyLevel() {
         guard let panel else { return }
-        panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
+        panel.level = guideRaised ? .floating : NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
         panel.orderFrontRegardless()
     }
 
@@ -231,8 +438,11 @@ final class OverlayController {
         if pressed && !wasPressed { dragCountAtPress = dragBoard.changeCount }
         wasPressed = pressed
         let types = (pressed && dragBoard.changeCount != dragCountAtPress) ? (dragBoard.types ?? []) : []
-        world.externalDrag = pressed && world.dragging == nil
+        world.externalDrag = pressed && world.dragging == nil && world.systemDrag == nil
             && (types.contains(.fileURL) || types.contains(Self.legacyFilenames))
+        // dragging a note toward the Dock: offer the Trash
+        let hint = world.dragging != nil && OverlayView.dockDistance(NSEvent.mouseLocation, in: panel.frame) < 70
+        if hint != world.trashHint { world.trashHint = hint; world.poke() }
 
         world.updateHover()
         world.advance(dt)
@@ -258,7 +468,7 @@ final class OverlayController {
         }
         cursorOwned = true
         if world.dragging != nil { NSCursor.closedHand.set() }
-        else if world.hoverStamp != nil || world.hoverHangBack != nil || world.plusHit(p) || world.bottleHit(p) || world.toastButton.contains(p) { NSCursor.pointingHand.set() }
+        else if world.hoverStamp != nil || world.hoverHangBack != nil || world.hoverTask != nil || world.hoverDelete != nil || world.plusHit(p) || world.bottleHit(p) || world.toastButton.contains(p) || world.guideSkipRect.contains(p) { NSCursor.pointingHand.set() }
         else if world.hoverCard != nil { NSCursor.openHand.set() }
         else { NSCursor.arrow.set() }
     }
@@ -279,6 +489,13 @@ final class OverlayController {
         world.addNote()
     }
 
+    var history: [StoredDone] {
+        if world.pruneHistory() { world.onChange?() }
+        return world.history
+    }
+    func rehang(historyID id: UUID) { world.rehang(historyID: id) }
+    func clearHistory() { world.clearHistory() }
+
     func hangAllBack() {
         if ropeHidden { ropeHidden = false }   // keeps the menu setting in step
         world.hangAllBack()
@@ -287,6 +504,7 @@ final class OverlayController {
     var theme: Theme {
         get { Theme.current }
         set {
+            if Theme.current == .christmas && newValue != .christmas { ChristmasWallpaper.restore() }
             Theme.current = newValue
             if newValue == .custom { CustomPapers.load(Theme.customSet) }
             world.themeChanged(); view.needsDisplay = true
@@ -340,11 +558,14 @@ final class OverlayController {
     func openEditor(_ card: Card) {
         editor?.finish(save: true)
         let anchor = screenPoint(CGPoint(x: card.center.x, y: card.center.y - card.h / 2))
-        editor = EditorController(card: card, anchorTop: anchor, within: panel.frame) { [weak self] text in
+        editor = EditorController(card: card, anchorTop: anchor, within: panel.frame) { [weak self] edit in
             guard let self else { return }
-            if let text { self.world.edited(card, text: text) }
+            if let edit { self.world.edited(card, text: edit.text, done: edit.done, color: .some(edit.color)) }
             self.editor = nil
+            self.world.guidePaused = false
         }
+        world.guidePaused = true
+        if guideRaised { editor?.panel.level = floatingCardLevel }
     }
 
     func toggleFinished() {
@@ -353,6 +574,7 @@ final class OverlayController {
         let anchor = screenPoint(CGPoint(x: max(12, c.x - 30), y: c.y + 46))
         let f = finishedPanel ?? FinishedController(world: world)
         finishedPanel = f
+        f.panel.level = guideRaised ? floatingCardLevel : .normal
         f.show(topLeft: anchor)
     }
 }

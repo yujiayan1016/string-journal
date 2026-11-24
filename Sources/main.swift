@@ -6,11 +6,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var ropeItem: NSMenuItem!
     private var styleItem: NSMenuItem!
     private var displayItem: NSMenuItem!
+    private var historyItem: NSMenuItem!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Fonts.register()
+        overlay.menuIcon = Self.menuIcon()
+        overlay.onHighlightMenuIcon = { [weak self] on in self?.statusItem?.button?.highlight(on) }
         overlay.start()
         setupStatusItem()
+        setupEditMenu()
+    }
+
+    /// The app has no menu bar of its own, so without this ⌘C / ⌘V / ⌘X / ⌘A / ⌘Z do nothing in the note editor.
+    private func setupEditMenu() {
+        let main = NSMenu()
+        let appItem = NSMenuItem(); appItem.submenu = NSMenu()
+        main.addItem(appItem)
+        let editItem = NSMenuItem(); let edit = NSMenu(title: "编辑")
+        editItem.submenu = edit
+        func add(_ title: String, _ sel: String, _ key: String, _ mods: NSEvent.ModifierFlags = .command) {
+            let i = NSMenuItem(title: title, action: Selector(sel), keyEquivalent: key)
+            i.keyEquivalentModifierMask = mods
+            edit.addItem(i)
+        }
+        add("撤销", "undo:", "z")
+        add("重做", "redo:", "z", [.command, .shift])
+        edit.addItem(.separator())
+        add("剪切", "cut:", "x")
+        add("拷贝", "copy:", "c")
+        add("粘贴", "paste:", "v")
+        add("粘贴并匹配样式", "pasteAsPlainText:", "v", [.command, .option, .shift])
+        add("全选", "selectAll:", "a")
+        main.addItem(editItem)
+        NSApp.mainMenu = main
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -32,6 +60,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         menu.addItem(item("新便签", #selector(newNote), "n"))
         menu.addItem(item("挂上文件…", #selector(chooseFiles), "o"))
         menu.addItem(item("已完成的便签…", #selector(showFinished), ""))
+        historyItem = NSMenuItem(title: "任务历史", action: nil, keyEquivalent: "")
+        historyItem.submenu = NSMenu()
+        menu.addItem(historyItem)
         menu.addItem(.separator())
         menu.addItem(item("全部挂回绳子", #selector(hangAllBack), ""))
         menu.addItem(.separator())
@@ -44,6 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         displayItem.submenu = NSMenu()
         menu.addItem(displayItem)
         menu.addItem(item("打开数据文件夹", #selector(openData), ""))
+        menu.addItem(item("新手引导…", #selector(showGuide), ""))
         menu.addItem(.separator())
         menu.addItem(item("退出绳上手帐", #selector(quit), "q"))
         statusItem.menu = menu
@@ -57,13 +89,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     func menuWillOpen(_ menu: NSMenu) {
         ropeItem.state = overlay.ropeHidden ? .off : .on
+        historyItem.submenu = historyMenu()
         // styles: the two built-in looks, then every imported paper set
         let sm = NSMenu()
         let journal = item("手帐", #selector(useJournal), "")
         journal.state = overlay.theme == .journal ? .on : .off
         let sticky = item("便利贴", #selector(useSticky), "")
         sticky.state = overlay.theme == .sticky ? .on : .off
-        sm.addItem(journal); sm.addItem(sticky)
+        let xmas = item("圣诞", #selector(useChristmas), "")
+        xmas.state = overlay.theme == .christmas ? .on : .off
+        sm.addItem(journal); sm.addItem(sticky); sm.addItem(xmas)
         let sets = CustomPapers.sets()
         if !sets.isEmpty {
             sm.addItem(.separator())
@@ -99,6 +134,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         displayItem.isHidden = screens.count < 2
     }
 
+    private static let historyDate: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "M月d日 HH:mm"; return f
+    }()
+
+    /// Tasks finished in the last 15 days; older ones drop off by themselves. Picking one hangs it back up.
+    private func historyMenu() -> NSMenu {
+        let m = NSMenu()
+        let items = overlay.history
+        let head = NSMenuItem(title: items.isEmpty ? "还没有完成的任务" : "最近 \(World.historyDays) 天完成的 \(items.count) 条",
+                              action: nil, keyEquivalent: "")
+        head.isEnabled = false
+        m.addItem(head)
+        guard !items.isEmpty else { return m }
+        m.addItem(.separator())
+        for h in items {
+            let title = h.text.split(separator: "\n", maxSplits: 1).first.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? ""
+            let it = NSMenuItem(title: "", action: #selector(rehangHistory(_:)), keyEquivalent: "")
+            it.target = self
+            it.representedObject = h.id
+            let s = NSMutableAttributedString(string: "✓ " + (title.isEmpty ? "便签" : String(title.prefix(28))),
+                                              attributes: [.font: NSFont.menuFont(ofSize: 0)])
+            s.append(NSAttributedString(string: "    " + Self.historyDate.string(from: h.doneAt),
+                                        attributes: [.font: NSFont.menuFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]))
+            it.attributedTitle = s
+            it.toolTip = h.text + "\n\n点一下重新挂回绳子"
+            m.addItem(it)
+        }
+        m.addItem(.separator())
+        m.addItem(item("清空任务历史", #selector(clearHistory), ""))
+        return m
+    }
+
+    @objc private func rehangHistory(_ sender: NSMenuItem) {
+        if let id = sender.representedObject as? UUID { overlay.rehang(historyID: id) }
+    }
+    @objc private func clearHistory() { overlay.clearHistory() }
+
     @objc private func newNote() { overlay.newNote() }
     @objc private func chooseFiles() { overlay.chooseFiles() }
 
@@ -108,7 +180,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
     }
     func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard !fileURLs(sender).isEmpty else { return [] }
+        guard sender.draggingSource == nil, !fileURLs(sender).isEmpty else { return [] }
         statusItem.button?.highlight(true)
         return sender.draggingSourceOperationMask.contains(.link) ? .link : .copy
     }
@@ -116,15 +188,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         statusItem.button?.highlight(false)
         let urls = fileURLs(sender)
-        guard !urls.isEmpty else { return false }
+        guard sender.draggingSource == nil, !urls.isEmpty else { return false }
         overlay.addFiles(urls)
         return true
     }
+    @objc private func showGuide() { overlay.showGuide() }
     @objc private func showFinished() { overlay.toggleFinished() }
     @objc private func toggleRope() { overlay.ropeHidden.toggle() }
     @objc private func hangAllBack() { overlay.hangAllBack() }
     @objc private func useJournal() { overlay.theme = .journal }
     @objc private func useSticky() { overlay.theme = .sticky }
+    /// Switching to Christmas also changes the desktop picture, so ask first.
+    @objc private func useChristmas() {
+        guard overlay.theme != .christmas else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        let a = NSAlert()
+        a.messageText = "换成圣诞风格"
+        a.informativeText = "圣诞风格配了一张圣诞桌面壁纸，桌面会一起换掉。\n\n之后想用别的壁纸，随时可以在「系统设置 › 墙纸」里换；切回其他风格时，会自动换回你原来的壁纸。"
+        a.addButton(withTitle: "换风格和壁纸")
+        a.addButton(withTitle: "只换便签，不换壁纸")
+        a.addButton(withTitle: "取消")
+        switch a.runModal() {
+        case .alertFirstButtonReturn:
+            overlay.theme = .christmas
+            ChristmasWallpaper.apply()
+        case .alertSecondButtonReturn:
+            overlay.theme = .christmas
+        default: break
+        }
+    }
     @objc private func useCustom(_ sender: NSMenuItem) {
         if let name = sender.representedObject as? String { overlay.useCustom(name) }
     }
