@@ -177,6 +177,17 @@ final class OverlayView: NSView, NSDraggingSource {
             colors.submenu = sub
             menu.addItem(colors)
         }
+        if c.kind == .note && !Theme.paperActive {
+            let sizes = NSMenuItem(title: "大小", action: nil, keyEquivalent: "")
+            let sub = NSMenu()
+            for z in NoteSize.allCases {
+                let it = MenuAction.item(z.name) { [weak self] in self?.world.setSize(c, z) }
+                it.state = c.noteSize == z ? .on : .off
+                sub.addItem(it)
+            }
+            sizes.submenu = sub
+            menu.addItem(sizes)
+        }
         menu.addItem(.separator())
         menu.addItem(MenuAction.item(c.kind == .note ? "扔进废纸篓" : "取下快捷方式（原文件不动）") { [weak self] in
             self?.world.throwInTrash(c)
@@ -468,6 +479,7 @@ final class OverlayController {
         }
         cursorOwned = true
         if world.dragging != nil { NSCursor.closedHand.set() }
+
         else if world.hoverStamp != nil || world.hoverHangBack != nil || world.hoverTask != nil || world.hoverDelete != nil || world.plusHit(p) || world.bottleHit(p) || world.toastButton.contains(p) || world.guideSkipRect.contains(p) { NSCursor.pointingHand.set() }
         else if world.hoverCard != nil { NSCursor.openHand.set() }
         else { NSCursor.arrow.set() }
@@ -560,7 +572,7 @@ final class OverlayController {
         let anchor = screenPoint(CGPoint(x: card.center.x, y: card.center.y - card.h / 2))
         editor = EditorController(card: card, anchorTop: anchor, within: panel.frame) { [weak self] edit in
             guard let self else { return }
-            if let edit { self.world.edited(card, text: edit.text, done: edit.done, color: .some(edit.color)) }
+            if let edit { self.world.edited(card, text: edit.text, done: edit.done, color: .some(edit.color), size: edit.size) }
             self.editor = nil
             self.world.guidePaused = false
         }

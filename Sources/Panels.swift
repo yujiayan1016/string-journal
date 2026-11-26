@@ -52,6 +52,7 @@ struct NoteEdit {
     var text: String
     var done: Set<String>
     var color: UInt32?
+    var size: NoteSize
 }
 
 private func hexOf(_ c: Color) -> UInt32? {
@@ -65,6 +66,7 @@ final class EditorModel: ObservableObject {
     @Published var title: String
     @Published var tasks: [Task]
     @Published var color: UInt32?
+    @Published var size: NoteSize
     let styleColor: UInt32       // the colour the note has when it follows the look
 
     init(card: Card) {
@@ -74,6 +76,7 @@ final class EditorModel: ObservableObject {
         let ts = placeholder ? [] : card.tasks
         tasks = ts.isEmpty ? [Task(text: "", done: false)] : ts.map { Task(text: $0, done: card.doneTasks.contains($0)) }
         color = card.customColor
+        size = card.noteSize
         let saved = card.customColor
         card.customColor = nil
         styleColor = card.color
@@ -106,7 +109,7 @@ final class EditorModel: ObservableObject {
         }
         let head = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let text = ([head.isEmpty ? "便签" : head] + lines).joined(separator: "\n")
-        return NoteEdit(text: text, done: done, color: color)
+        return NoteEdit(text: text, done: done, color: color, size: size)
     }
 }
 
@@ -148,7 +151,7 @@ private struct EditorView: View {
                         withAnimation { proxy.scrollTo("add") }
                     }
                 }
-                if !Theme.paperActive { swatches }
+                if !Theme.paperActive { swatches; sizePicker }
                 HStack {
                     Text("↩ 下一项 · Esc 取消 · ⌘↩ 保存")
                         .font(.system(size: 11))
@@ -166,7 +169,7 @@ private struct EditorView: View {
             .padding(EdgeInsets(top: 24, leading: 18, bottom: 14, trailing: 18))
             if Theme.current != .sticky { Washi(color: Color(red: 0.66, green: 0.81, blue: 0.75)).offset(y: -4) }
         }
-        .frame(width: 340, height: 380)
+        .frame(width: 340, height: 410)
         .onExitCommand { done(false) }
         .onAppear {
             DispatchQueue.main.async {
@@ -210,6 +213,18 @@ private struct EditorView: View {
                 .buttonStyle(.plain)
                 .help("删除这一项")
             }
+        }
+    }
+
+    private var sizePicker: some View {
+        HStack(spacing: 8) {
+            Text("大小").font(.system(size: 12)).foregroundColor(inkColor.opacity(0.6))
+            Picker("", selection: $model.size) {
+                ForEach(NoteSize.allCases, id: \.self) { Text($0.name).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 132)
         }
     }
 
@@ -284,7 +299,7 @@ final class EditorController: NSObject, NSWindowDelegate {
     init(card: Card, anchorTop: NSPoint, within screen: NSRect, onFinish: @escaping (NoteEdit?) -> Void) {
         model = EditorModel(card: card)
         self.onFinish = onFinish
-        let size = NSSize(width: 340, height: 380)
+        let size = NSSize(width: 340, height: 410)
         panel = makePaperPanel(size: size)
         super.init()
         let view = EditorView(model: model) { [weak self] save in

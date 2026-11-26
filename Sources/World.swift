@@ -1,5 +1,4 @@
-import Foundation
-import CoreGraphics
+import AppKit
 
 // MARK: - Geometry helpers
 
@@ -35,9 +34,15 @@ final class Card {
     let seed: Double
 
     var mode: Mode = .hang
-    let w: CGFloat = CW
+    /// 小 / 中 / 大. Imported paper and file shortcuts keep the usual size.
+    var noteSize: NoteSize = .small
+    private var sized: Bool { kind == .note && !Theme.paperActive }
+    var w: CGFloat { sized ? noteSize.dims.width : CW }
     /// Imported paper is square so its artwork isn't cropped; everything else uses the usual size.
-    var h: CGFloat { kind == .note && Theme.paperActive ? CW : CH }
+    var h: CGFloat {
+        if kind == .note && Theme.paperActive { return CW }
+        return sized ? noteSize.dims.height : CH
+    }
     // position along the rope
     var x: CGFloat = 0, homeX: CGFloat = 0, vx: CGFloat = 0
     // rotation
@@ -173,6 +178,7 @@ final class World {
     var flash: (card: Card, text: String, until: Double)?
     var dragging: Card?
     private var pending: (card: Card, at: CGPoint)?
+
     var dragSlot: CGFloat?
     var slotX: CGFloat?
 
@@ -270,12 +276,14 @@ final class World {
     var bottleMouth: CGPoint { bottlePoint(0, 22) }
     var bottleCenter: CGPoint { bottlePoint(0, 66) }
 
-    private struct Slot { var id: UUID?; var x: CGFloat; var r: CGFloat = 0 }
+    private struct Slot { var id: UUID?; var x: CGFloat; var w: CGFloat = CW; var r: CGFloat = 0 }
+    /// Centre-to-centre spacing for two neighbours on the rope (wider notes need more room).
+    private func gap(_ a: Slot, _ b: Slot) -> CGFloat { (a.w + b.w) / 2 + 28 }
 
     /// Resolved rope positions: no two notes closer than GAP, the hovered slot stays put.
     private func layoutTargets() -> [UUID: CGFloat] {
-        var items = cards.filter { $0.mode == .hang }.map { Slot(id: $0.id, x: $0.homeX) }
-        if let s = dragSlot { items.append(Slot(id: nil, x: s)) }
+        var items = cards.filter { $0.mode == .hang }.map { Slot(id: $0.id, x: $0.homeX, w: $0.w) }
+        if let s = dragSlot { items.append(Slot(id: nil, x: s, w: dragging?.w ?? CW)) }
         items.sort { $0.x < $1.x }
         let lo = ropeLo, hi = ropeHi
         for i in items.indices { items[i].r = clamp(items[i].x, lo, hi) }
@@ -283,7 +291,7 @@ final class World {
             for _ in 0..<40 {
                 var moved = false
                 for i in 0..<(items.count - 1) {
-                    let o = GAP - (items[i + 1].r - items[i].r)
+                    let o = gap(items[i], items[i + 1]) - (items[i + 1].r - items[i].r)
                     if o <= 0.01 { continue }
                     moved = true
                     if items[i].id == nil { items[i + 1].r += o }
@@ -293,9 +301,9 @@ final class World {
                 for i in items.indices { items[i].r = clamp(items[i].r, lo, hi) }
                 if !moved { break }
             }
-            for i in 1..<items.count { items[i].r = max(items[i].r, items[i - 1].r + GAP) }
-            for i in stride(from: items.count - 2, through: 0, by: -1) { items[i].r = min(items[i].r, items[i + 1].r - GAP) }
-            for i in items.indices { items[i].r = max(items[i].r, lo); if i > 0 { items[i].r = max(items[i].r, items[i - 1].r + GAP) } }
+            for i in 1..<items.count { items[i].r = max(items[i].r, items[i - 1].r + gap(items[i - 1], items[i])) }
+            for i in stride(from: items.count - 2, through: 0, by: -1) { items[i].r = min(items[i].r, items[i + 1].r - gap(items[i], items[i + 1])) }
+            for i in items.indices { items[i].r = max(items[i].r, lo); if i > 0 { items[i].r = max(items[i].r, items[i - 1].r + gap(items[i - 1], items[i])) } }
         }
         var map: [UUID: CGFloat] = [:]
         slotX = nil
@@ -596,6 +604,18 @@ final class World {
 
     /// Lays out a note's task list for the current look; nil when it has fewer than two tasks.
     /// Shared by drawing and hit testing so the boxes are always where they are drawn.
+    /// The font tasks are written in (shared with drawing so wrapping matches).
+    static func taskFont() -> NSFont { Theme.current == .sticky ? .systemFont(ofSize: 12.5) : Fonts.hand(14) }
+
+    /// Height a task's words need at this width (wrapping onto as many lines as it takes).
+    static func taskTextHeight(_ text: String, width: CGFloat) -> CGFloat {
+        let para = NSMutableParagraphStyle(); para.lineBreakMode = .byWordWrapping
+        let a = NSAttributedString(string: text, attributes: [.font: taskFont(), .paragraphStyle: para])
+        return ceil(a.boundingRect(with: CGSize(width: max(20, width), height: 2000), options: [.usesLineFragmentOrigin, .usesFontLeading]).height)
+    }
+
+    /// Where each task row sits on a note: long tasks wrap onto more lines; what doesn't fit becomes "还有 N 项…".
+    /// Shared by drawing and hit testing so the boxes are always where they are drawn.
     func taskLayout(_ c: Card) -> (rows: [TaskRow], more: Int, lineH: CGFloat)? {
         guard c.hasTaskList, c.mode != .plane || c.t < PLANE_FOLD else { return nil }
         let tasks = c.tasks
@@ -609,20 +629,37 @@ final class World {
             let pad = c.textPad
             left = x0 + pad - 1; top = y0 + 44; width = w - pad - 12 - c.frameInset; bottom = h / 2 - 27; lineH = 19.5
         }
-        let fit = max(1, Int((bottom - top) / lineH))
-        let shown = tasks.count <= fit ? tasks.count : fit - 1
-        var rows: [TaskRow] = []
-        for i in 0..<shown {
-            let y = top + CGFloat(i) * lineH
-            var rw = width
-            // stay clear of the note's own "done" box in the bottom-right corner
-            if !Theme.paperActive && y + lineH > h / 2 - 28 { rw = min(rw, (w / 2 - 30) - left) }
-            if Theme.paperActive && y + lineH > y0 + h * 0.5 { rw = min(rw, w * 0.54 - 16) }
-            let r = CGRect(x: left, y: y, width: rw, height: lineH)
-            rows.append(TaskRow(index: i, text: tasks[i], done: c.doneTasks.contains(tasks[i]), rect: r,
-                                box: CGPoint(x: left + 5.5, y: y + lineH / 2 + 0.5), textX: left + 15))
+        let oneLine = Self.taskTextHeight("字", width: 200)
+        func rowHeight(_ t: String, _ rw: CGFloat) -> CGFloat {
+            max(lineH, Self.taskTextHeight(t, width: rw - 15) + (lineH - oneLine))
         }
-        return (rows, tasks.count - shown, lineH)
+        var rows: [TaskRow] = []
+        var y = top
+        for (i, t) in tasks.enumerated() {
+            var rw = width
+            var rh = rowHeight(t, rw)
+            // stay clear of the note's own "done" box in the bottom-right corner
+            if !Theme.paperActive && y + rh > h / 2 - 28 { rw = min(rw, (w / 2 - 30) - left); rh = rowHeight(t, rw) }
+            if Theme.paperActive && y + rh > y0 + h * 0.5 { rw = min(rw, w * 0.54 - 16); rh = rowHeight(t, rw) }
+            if y + rh > bottom && i > 0 { break }
+            rows.append(TaskRow(index: i, text: t, done: c.doneTasks.contains(t), rect: CGRect(x: left, y: y, width: rw, height: min(rh, bottom - y)),
+                                box: CGPoint(x: left + 5.5, y: y + lineH / 2 + 0.5), textX: left + 15))
+            y += rh
+        }
+        // leave a line for "还有 N 项…" when not everything fits
+        if rows.count < tasks.count, rows.count > 1, let last = rows.last, last.rect.maxY > bottom - lineH + 4 { rows.removeLast() }
+        return (rows, tasks.count - rows.count, lineH)
+    }
+
+    /// Switches a note between 小 / 中 / 大; a hanging note grows out from its clip.
+    func setSize(_ c: Card, _ size: NoteSize) {
+        guard c.noteSize != size else { return }
+        let oh = c.h
+        c.noteSize = size
+        if c.mode == .hang { c.r0 = CGPoint(x: 0, y: CLIP + c.h / 2) }
+        else { let s = rot(c.th, 0, (c.h - oh) / 2); c.c.x += s.x; c.c.y += s.y }
+        c.om += Tuning.nudge * 0.4
+        poke(); onChange?()
     }
 
     /// Which task checkbox (if any) is under the pointer.
@@ -1116,12 +1153,13 @@ final class World {
         poke(); onChange?()
     }
 
-    func edited(_ c: Card, text: String, done: Set<String>? = nil, color: UInt32?? = nil) {
+    func edited(_ c: Card, text: String, done: Set<String>? = nil, color: UInt32?? = nil, size: NoteSize? = nil) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         c.text = t.isEmpty ? "（空白）" : t
         if let done { c.doneTasks = done }
         if let color { c.customColor = color }
         c.doneTasks.formIntersection(c.tasks)
+        if let size { setSize(c, size) }
         c.om += Tuning.nudge * 0.5
         poke(); onChange?()
         guideSaw(.edited, c)
@@ -1212,13 +1250,15 @@ final class World {
                 return StoredNote(id: c.id, text: c.text, style: c.style, onRope: true, ropeX: Double(c.homeX / W),
                                   deskX: 0, deskY: 0, tilt: 0, stamped: c.stampAt != nil,
                                   kind: c.kind == .note ? nil : c.kind.rawValue, path: c.url?.path, bookmark: c.bookmark,
-                                  doneTasks: c.doneTasks.isEmpty ? nil : c.doneTasks.sorted(), color: c.customColor)
+                                  doneTasks: c.doneTasks.isEmpty ? nil : c.doneTasks.sorted(), color: c.customColor,
+                                  size: c.noteSize == .small ? nil : c.noteSize.rawValue)
             case .free, .drag:
                 return StoredNote(id: c.id, text: c.text, style: c.style, onRope: false, ropeX: Double(c.homeX / W),
                                   deskX: Double(c.c.x / W), deskY: Double(c.c.y / H), tilt: Double(c.rest), stamped: c.stampAt != nil,
                                   wasOnRope: c.wasOnRope,
                                   kind: c.kind == .note ? nil : c.kind.rawValue, path: c.url?.path, bookmark: c.bookmark,
-                                  doneTasks: c.doneTasks.isEmpty ? nil : c.doneTasks.sorted(), color: c.customColor)
+                                  doneTasks: c.doneTasks.isEmpty ? nil : c.doneTasks.sorted(), color: c.customColor,
+                                  size: c.noteSize == .small ? nil : c.noteSize.rawValue)
             case .sink, .crumple, .plane, .trash:
                 return nil   // about to be finished; saved with the finished list
             }
@@ -1236,6 +1276,7 @@ final class World {
             let c = Card(id: n.id, text: n.text, style: n.style)
             c.doneTasks = Set(n.doneTasks ?? [])
             c.customColor = n.color
+            c.noteSize = n.size.flatMap(NoteSize.init(rawValue:)) ?? .small
             if n.stamped { c.stampAt = -10; c.stampDate = Date() }
             if let k = n.kind.flatMap(CardKind.init(rawValue:)), k != .note {
                 c.kind = k; c.bookmark = n.bookmark

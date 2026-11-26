@@ -30,6 +30,19 @@ var notePalette: [(name: String, hex: UInt32)] {
             ("橘子橙", 0xFFCB86), ("薰衣草", 0xD9C7F4), ("米白", 0xFBFBF7), ("牛皮纸", 0xD6B38A)]
 }
 
+/// Three note sizes to pick from (right-click → 大小, or in the editor).
+enum NoteSize: String, Codable, CaseIterable {
+    case small, medium, large
+    var name: String { switch self { case .small: return "小"; case .medium: return "中"; case .large: return "大" } }
+    var dims: CGSize {
+        switch self {
+        case .small: return CGSize(width: 150, height: 132)
+        case .medium: return CGSize(width: 190, height: 192)
+        case .large: return CGSize(width: 240, height: 268)
+        }
+    }
+}
+
 // MARK: - Journal styles
 
 enum Paper: String, Codable { case kraft, grid, lined, dot, torn, plain }
@@ -109,6 +122,7 @@ struct StoredNote: Codable {
     var bookmark: Data? = nil    // file shortcut: finds the file again after a move or rename
     var doneTasks: [String]? = nil   // ticked lines of a note with several tasks
     var color: UInt32? = nil         // colour picked by the user
+    var size: String? = nil          // 小 / 中 / 大 (nil = 小)
 }
 
 struct StoredDone: Codable {

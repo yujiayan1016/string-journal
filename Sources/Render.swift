@@ -223,8 +223,8 @@ final class Renderer {
         drawRopeGreenery()
         drawSprig(at: CGPoint(x: 30, y: world.ropeAt(30).y), mirror: -1)
         drawSprig(at: CGPoint(x: W - 28, y: world.ropeAt(W - 28).y), mirror: 1)
-        var busy = hanging.map { ($0.center.x - CW / 2 - 18, $0.center.x + CW / 2 + 18) }
-        if let d = world.dragging { busy.append((d.center.x - CW / 2 - 18, d.center.x + CW / 2 + 18)) }
+        var busy = hanging.map { ($0.center.x - $0.w / 2 - 18, $0.center.x + $0.w / 2 + 18) }
+        if let d = world.dragging { busy.append((d.center.x - d.w / 2 - 18, d.center.x + d.w / 2 + 18)) }
         busy.append((-100, 150)); busy.append((W - 120, W + 100))   // bottle and "+" ends
         busy.sort { $0.0 < $1.0 }
         var gaps: [(CGFloat, CGFloat)] = []
@@ -706,7 +706,8 @@ final class Renderer {
         let r = world.ropeAt(sx)
         ctx.saveGState()
         ctx.translateBy(x: r.x, y: r.y + CLIP)
-        let rect = CGRect(x: -CW / 2, y: 0, width: CW, height: world.dragging?.h ?? CH)
+        let gw = world.dragging?.w ?? CW
+        let rect = CGRect(x: -gw / 2, y: 0, width: gw, height: world.dragging?.h ?? CH)
         let p = CGPath(roundedRect: rect, cornerWidth: 4, cornerHeight: 4, transform: nil)
         ctx.addPath(p); ctx.setFillColor(rgba(255, 255, 255, 0.3)); ctx.fillPath()
         ctx.setLineDash(phase: 0, lengths: [5, 5])
@@ -1464,8 +1465,9 @@ final class Renderer {
 
     /// A note with several tasks: one line each, a small box in front; ticked lines are struck through.
     private func drawTasks(_ c: Card, _ lay: (rows: [TaskRow], more: Int, lineH: CGFloat), font: NSFont, ink: CGColor) {
-        let para = NSMutableParagraphStyle(); para.lineBreakMode = .byTruncatingTail
+        let para = NSMutableParagraphStyle(); para.lineBreakMode = .byWordWrapping
         let hover = world.hoverTask?.card === c ? world.hoverTask?.index : nil
+        let oneLine = World.taskTextHeight("字", width: 200)
         let wobble: CGFloat = Theme.handmade ? 0.9 : 0
         for r in lay.rows {
             let on = hover == r.index
@@ -1499,9 +1501,9 @@ final class Renderer {
                 attrs[.strikethroughColor] = NSColor(cgColor: rgb(SEAL, 0.55))
             }
             let a = NSAttributedString(string: r.text, attributes: attrs)
-            let th = a.boundingRect(with: CGSize(width: 1000, height: 100), options: [.usesLineFragmentOrigin]).height
-            a.draw(with: CGRect(x: r.textX, y: r.rect.midY - th / 2, width: r.rect.maxX - r.textX, height: th + 2),
-                   options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+            let ty = r.rect.minY + (lay.lineH - oneLine) / 2
+            a.draw(with: CGRect(x: r.textX, y: ty, width: r.rect.maxX - r.textX, height: r.rect.maxY - ty + 1),
+                   options: [.usesLineFragmentOrigin, .usesFontLeading, .truncatesLastVisibleLine])
         }
         if lay.more > 0, let last = lay.rows.last {
             let a = NSAttributedString(string: "还有 \(lay.more) 项…", attributes: [
